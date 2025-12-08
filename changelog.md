@@ -10,3 +10,12 @@
 - added: config option for making mobs invulnerable while their AI is disabled due to no players nearby (`mob_ai.disable_ai_when_no_players_nearby.invulnerable`)
 - added: `{item_name}` placeholder for the `hologram_format` config option
 - changed: the previous `{item}` placeholder for the `hologram_format` config option to `{item_type}`
+
+## v0.0.3
+- added: bStats
+
+## v0.0.4
+- added: tick speed performance control (decrease tick speed in all worlds if tps are low)
+
+## v0.0.5
+- fixed: inventory item pickup

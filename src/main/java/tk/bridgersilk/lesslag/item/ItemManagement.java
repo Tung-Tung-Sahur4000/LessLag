@@ -18,7 +18,9 @@ import org.bukkit.entity.Item;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
+import org.bukkit.event.inventory.InventoryPickupItemEvent;
 import org.bukkit.event.entity.EntityPickupItemEvent;
+import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
@@ -257,8 +259,8 @@ public class ItemManagement implements Listener {
 		return Character.toUpperCase(name.charAt(0)) + name.substring(1);
 	}
 
-    private HashMap<Integer, ItemStack> simulateAddItem(Player player, ItemStack stack) {
-        ItemStack[] contents = player.getInventory().getContents().clone();
+    private HashMap<Integer, ItemStack> simulateAddItem(Inventory inv, ItemStack stack) {
+        ItemStack[] contents = inv.getContents().clone();
         HashMap<Integer, ItemStack> leftovers = new HashMap<>();
         ItemStack clone = stack.clone();
 
@@ -290,8 +292,52 @@ public class ItemManagement implements Listener {
         return leftovers;
     }
 
+    @EventHandler
+    public void onInventoryItemPickup(InventoryPickupItemEvent event) {
+        Item item = event.getItem();
+        UUID id = item.getUniqueId();
+        Inventory inv = event.getInventory();
+
+        if (!stackedAmounts.containsKey(id)) return;
+
+        int totalAmount = stackedAmounts.get(id);
+
+        ItemStack cleanedItem = item.getItemStack().clone();
+        ItemMeta meta = cleanedItem.getItemMeta();
+        if (meta != null) {
+            meta.getPersistentDataContainer().remove(STACK_KEY);
+            cleanedItem.setItemMeta(meta);
+        }
+
+        if (pickupBehavior.equals("partial")) {
+            HashMap<Integer, ItemStack> leftovers = inv.addItem(createItemWithAmount(cleanedItem, totalAmount));
+            int pickedUp = totalAmount - leftovers.values().stream().mapToInt(ItemStack::getAmount).sum();
+
+            if (pickedUp >= totalAmount) {
+                stackedAmounts.remove(id);
+                item.remove();
+            } else {
+                stackedAmounts.put(id, totalAmount - pickedUp);
+                updateHologram(item);
+            }
+        } else if (pickupBehavior.equals("full")) {
+            ItemStack testStack = createItemWithAmount(cleanedItem, totalAmount);
+            HashMap<Integer, ItemStack> simulatedLeftovers = simulateAddItem(inv, testStack);
+
+            if (simulatedLeftovers.isEmpty()) {
+                inv.addItem(testStack);
+                stackedAmounts.remove(id);
+                item.remove();
+            } else {
+                event.setCancelled(true);
+            }
+        }
+
+        event.setCancelled(true);
+    }
+
 	@EventHandler
-    public void onItemPickup(EntityPickupItemEvent event) {
+    public void onItemPickup(EntityPickupItemEvent event) { // fix: non player entities not handled yet (zombies, villagers, etc)
         if (!(event.getEntity() instanceof Player player)) return;
 
         Item item = event.getItem();
@@ -321,7 +367,7 @@ public class ItemManagement implements Listener {
             }
         } else if (pickupBehavior.equals("full")) {
             ItemStack testStack = createItemWithAmount(cleanedItem, totalAmount);
-            HashMap<Integer, ItemStack> simulatedLeftovers = simulateAddItem(player, testStack);
+            HashMap<Integer, ItemStack> simulatedLeftovers = simulateAddItem(player.getInventory(), testStack);
 
             if (simulatedLeftovers.isEmpty()) {
                 player.getInventory().addItem(testStack);
