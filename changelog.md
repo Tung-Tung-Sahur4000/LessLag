@@ -1,8 +1,5 @@
-## v0.0.4
-- added tick speed performance control (decrease tick speed in all worlds if tps are low)
-
-## v0.0.3
-- added bStats
+## v0.0.1
+- first release
 
 ## v0.0.2
 - fixed: teleportation in the same world getting cancelled when worlds are full (feature: world player limit)
@@ -19,3 +16,7 @@
 
 ## v0.0.5
 - fixed: inventory item pickup
+
+## v0.0.6
+- added: Explosion Queue System
+- added: (WIP) Web interface with login system for a web based performance data viewer (will be released in a future update)

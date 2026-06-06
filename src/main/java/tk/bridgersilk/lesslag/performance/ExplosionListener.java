@@ -3,34 +3,80 @@ package tk.bridgersilk.lesslag.performance;
 import org.bukkit.Bukkit;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.ExplosionPrimeEvent;
-import org.bukkit.plugin.Plugin;
+
+import tk.bridgersilk.lesslag.LessLag;
+import tk.bridgersilk.lesslag.performance.explosion.ExplosionQueueManager;
 
 public class ExplosionListener implements Listener {
 
-	private final Plugin plugin;
-	private final FileConfiguration config;
-    private final double tpsThreshold;
+	private final LessLag plugin;
+	private final double tpsThreshold;
 
-	public ExplosionListener(Plugin plugin, double tpsThreshold) {
+	public ExplosionListener(
+		LessLag plugin,
+		double tpsThreshold
+	) {
 		this.plugin = plugin;
-        this.tpsThreshold = tpsThreshold;
-		this.config = plugin.getConfig();
-        Bukkit.getPluginManager().registerEvents(this, plugin);
+		this.tpsThreshold = tpsThreshold;
+
+		Bukkit.getPluginManager().registerEvents(
+			this,
+			plugin
+		);
 	}
 
-	@EventHandler
-	public void onExplosionPrime(ExplosionPrimeEvent event) {
-		if (!config.getBoolean("performance_controls.disable_explosions.enabled")) return;
+	@EventHandler(
+		priority = EventPriority.HIGHEST,
+		ignoreCancelled = true
+	)
+	public void onExplosionPrime(
+		ExplosionPrimeEvent event
+	) {
+		FileConfiguration config = plugin
+			.getConfigManager()
+			.getConfig();
 
-		double tps = Bukkit.getServer().getTPS()[0];
-		if (tps > tpsThreshold) return;
+		if (
+			!config.getBoolean(
+				"performance_controls.disable_explosions.enabled",
+				false
+			)
+		) {
+			return;
+		}
+
+		ExplosionQueueManager queueManager =
+			plugin.getExplosionQueueManager();
+
+		/*
+		 * Do not cancel explosions recreated by the queue.
+		 */
+		if (
+			queueManager != null
+				&& queueManager.isReplayingExplosion()
+		) {
+			return;
+		}
+
+		double[] recentTps = Bukkit.getTPS();
+
+		double currentTps = recentTps.length > 0
+			? recentTps[0]
+			: 20.0;
+
+		if (currentTps > tpsThreshold) {
+			return;
+		}
 
 		event.setCancelled(true);
 	}
 
-    public void unregister() {
-        ExplosionPrimeEvent.getHandlerList().unregister(this);
-    }
+	public void unregister() {
+		ExplosionPrimeEvent
+			.getHandlerList()
+			.unregister(this);
+	}
 }

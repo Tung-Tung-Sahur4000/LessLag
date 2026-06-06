@@ -4,7 +4,7 @@
 </p>
 
 <p align="center">
-  <img src="https://badgen.net/badge/minecraft/1.16-1.21.8/blue" alt="Minecraft Version">
+  <img src="https://badgen.net/badge/minecraft/1.16-26.1.2/blue" alt="Minecraft Version">
   <img src="https://badgen.net/badge/server/paper%20|%20spigot/green" alt="Server Type">
   <img src="https://badgen.net/badge/performance/optimized%20for%20lag%20reduction/purple" alt="Performance">
   <img src="https://badgen.net/badge/java/17+/orange" alt="Java Version">
@@ -122,9 +122,10 @@ From unloading inactive worlds to merging dropped items, disabling redstone duri
 
 ## 📌 Latest Update
 
-**Version:** `v0.0.5`
+**Version:** `v0.0.6`
 
-* ✅ fixed: inventory item pickup
+* ✅ added: Explosion Queue System
+* ✅ added: _(WIP)_ Web interface with login system for a web based performance data viewer _(will be released in a future update)_
 
 ---
 
