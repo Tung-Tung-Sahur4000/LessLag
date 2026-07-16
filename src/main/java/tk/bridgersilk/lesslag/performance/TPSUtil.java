@@ -41,14 +41,31 @@ public class TPSUtil {
         return mspt > 0 ? clamp(1000.0 / mspt) : 20.0;
     }
 
+    // The reactive signal is read on hot event paths — BlockPhysicsEvent and
+    // BlockFromToEvent can fire thousands of times per tick. The underlying
+    // TPS/MSPT values only change once per tick, so the result is memoised for
+    // ~one tick (50ms): at most one computation per tick regardless of how
+    // many events ask. Initialised one TTL in the past so the first call
+    // always computes. Only touched from the main server thread.
+    private static final long CACHE_TTL_NANOS = 50_000_000L; // one tick
+    private static long responsiveCacheAt = System.nanoTime() - CACHE_TTL_NANOS;
+    private static double responsiveCacheValue = 20.0;
+
     /**
      * Spike-aware reactive signal: the lower of the instantaneous (MSPT) and
      * the 1-minute-average TPS. Reacting on the minimum means a short spike
      * (low instant TPS) trips it immediately, while sustained lag (low
-     * average) still trips it as it always did.
+     * average) still trips it as it always did. Cached for one tick so hot
+     * event paths don't recompute it thousands of times per tick.
      */
     public static double getResponsiveTPS() {
-        return Math.min(getInstantTPS(), getAverageTPS());
+        long now = System.nanoTime();
+        if (now - responsiveCacheAt < CACHE_TTL_NANOS) {
+            return responsiveCacheValue;
+        }
+        responsiveCacheValue = Math.min(getInstantTPS(), getAverageTPS());
+        responsiveCacheAt = now;
+        return responsiveCacheValue;
     }
 
     /** True when the responsive signal is below the given threshold. */
