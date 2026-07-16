@@ -69,10 +69,21 @@ packet-spam protection, and the profiler ON — everything broken OFF.
 - `Bukkit.getScheduler().cancelTasks(plugin)` in `WorldManager.disable()`
   and `Profiler.disable()` cancels **every** plugin task, not just their
   own — fragile on `/ll reload`. Prefer restart over reload for now.
-- Stacked item amounts live in memory only → ground stacks can lose their
-  count across a server restart. Should be persisted (e.g. PDC).
 - Reactive features use 1-minute-average TPS; a shorter/MSPT-based signal
   would react to spikes.
+
+## Recently fixed on this branch
+- **Stacked item amounts now persist** (`item/ItemManagement.java`). The
+  count is mirrored onto the item **entity's** PersistentDataContainer
+  (`lesslag:stack_amount`, INTEGER), which is saved to disk with the
+  chunk. On restart/reload the stacking task recovers the count from the
+  entity instead of resetting it to 1, so ground stacks no longer lose
+  their amount (hologram said "x64", pickup gave 1). All map writes now go
+  through `setStackedAmount`/`clearStackedAmount` helpers that keep the
+  in-memory map and the PDC in sync.
+- Also fixed: `reload()` stopped the stacking task but never restarted it
+  (stacking silently died after `/ll reload`); it now restarts and
+  recovers amounts from PDC. `disable()` now stops the stacking task too.
 
 ## Current task / where we stopped
 Learning to use the **spark** profiler to find the *real* lag source.

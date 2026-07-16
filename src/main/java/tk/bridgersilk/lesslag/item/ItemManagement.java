@@ -89,7 +89,10 @@ public class ItemManagement implements Listener {
 		stopAutoClearTask();
 		startAutoClearTask();
         stopStackingTask();
+        // Clear only the in-memory map; the amounts persisted on the item
+        // entities survive and are recovered when the task restarts below.
         stackedAmounts.clear();
+        startStackingTask();
 	}
 
 	private void startAutoClearTask() {
@@ -129,16 +132,27 @@ public class ItemManagement implements Listener {
                     if (item.isDead()) continue;
 
                     if (!stackedAmounts.containsKey(item.getUniqueId())) {
-                        int totalAmount = item.getItemStack().getAmount();
+                        Integer persisted = item.getPersistentDataContainer()
+                                .get(AMOUNT_KEY, PersistentDataType.INTEGER);
 
-                        ItemStack newStack = item.getItemStack().clone();
-                        newStack.setAmount(1);
-                        newStack = tagStackedItem(newStack);
+                        if (persisted != null) {
+                            // Recovered after a restart/reload: the entity is
+                            // already tagged and its ItemStack already holds a
+                            // single item, so just restore the real count.
+                            stackedAmounts.put(item.getUniqueId(), persisted);
+                            updateHologram(item);
+                        } else {
+                            int totalAmount = item.getItemStack().getAmount();
 
-                        item.setItemStack(newStack);
+                            ItemStack newStack = item.getItemStack().clone();
+                            newStack.setAmount(1);
+                            newStack = tagStackedItem(newStack);
 
-                        stackedAmounts.put(item.getUniqueId(), totalAmount);
-                        updateHologram(item);
+                            item.setItemStack(newStack);
+
+                            setStackedAmount(item, totalAmount);
+                            updateHologram(item);
+                        }
                     }
 
                     stackNearbyItems(item);
@@ -163,10 +177,30 @@ public class ItemManagement implements Listener {
 
 	public void disable() {
 		stopAutoClearTask();
+		stopStackingTask();
 		stackedAmounts.clear();
 	}
 
     private final NamespacedKey STACK_KEY = new NamespacedKey("lesslag", "stack_id");
+
+    // Persisted on the item ENTITY (not the ItemStack). Item entities are
+    // saved to disk with their chunk, so mirroring the stacked amount here
+    // lets us recover it after a restart/reload instead of losing the count
+    // that otherwise lived only in the in-memory stackedAmounts map.
+    private final NamespacedKey AMOUNT_KEY = new NamespacedKey("lesslag", "stack_amount");
+
+    // Records a stacked amount in both the in-memory map and the item
+    // entity's persistent storage so the two never drift apart.
+    private void setStackedAmount(Item item, int amount) {
+        stackedAmounts.put(item.getUniqueId(), amount);
+        item.getPersistentDataContainer().set(AMOUNT_KEY, PersistentDataType.INTEGER, amount);
+    }
+
+    // Clears a stacked amount from the map and the item entity's storage.
+    private void clearStackedAmount(Item item) {
+        stackedAmounts.remove(item.getUniqueId());
+        item.getPersistentDataContainer().remove(AMOUNT_KEY);
+    }
 
     private ItemStack tagStackedItem(ItemStack stack) {
         ItemStack tagged = stack.clone();
@@ -197,8 +231,8 @@ public class ItemManagement implements Listener {
             int otherAmount = stackedAmounts.getOrDefault(other.getUniqueId(), other.getItemStack().getAmount());
             baseAmount += otherAmount;
 
+            clearStackedAmount(other);
             other.remove();
-            stackedAmounts.remove(other.getUniqueId());
         }
 
         ItemStack newStack = baseStack.clone();
@@ -206,7 +240,7 @@ public class ItemManagement implements Listener {
         newStack = tagStackedItem(newStack);
 
         baseItem.setItemStack(newStack);
-        stackedAmounts.put(baseItem.getUniqueId(), baseAmount);
+        setStackedAmount(baseItem, baseAmount);
         updateHologram(baseItem);
     }
 
@@ -318,10 +352,10 @@ public class ItemManagement implements Listener {
             int pickedUp = totalAmount - leftovers.values().stream().mapToInt(ItemStack::getAmount).sum();
 
             if (pickedUp >= totalAmount) {
-                stackedAmounts.remove(id);
+                clearStackedAmount(item);
                 item.remove();
             } else {
-                stackedAmounts.put(id, totalAmount - pickedUp);
+                setStackedAmount(item, totalAmount - pickedUp);
                 updateHologram(item);
             }
         } else if (pickupBehavior.equals("full")) {
@@ -330,7 +364,7 @@ public class ItemManagement implements Listener {
 
             if (simulatedLeftovers.isEmpty()) {
                 inv.addItem(testStack);
-                stackedAmounts.remove(id);
+                clearStackedAmount(item);
                 item.remove();
             } else {
                 event.setCancelled(true);
@@ -370,10 +404,10 @@ public class ItemManagement implements Listener {
             }
 
             if (pickedUp >= totalAmount) {
-                stackedAmounts.remove(id);
+                clearStackedAmount(item);
                 item.remove();
             } else {
-                stackedAmounts.put(id, totalAmount - pickedUp);
+                setStackedAmount(item, totalAmount - pickedUp);
                 updateHologram(item);
             }
         } else if (pickupBehavior.equals("full")) {
@@ -383,7 +417,7 @@ public class ItemManagement implements Listener {
             if (simulatedLeftovers.isEmpty()) {
                 player.getInventory().addItem(testStack);
                 playPickupSound(player);
-                stackedAmounts.remove(id);
+                clearStackedAmount(item);
                 item.remove();
             } else {
                 event.setCancelled(true);
