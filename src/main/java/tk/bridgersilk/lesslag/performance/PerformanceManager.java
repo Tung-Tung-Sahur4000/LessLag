@@ -175,7 +175,11 @@ public class PerformanceManager {
 			);
 		}
 
-		if (mobAiDisableWhenNoPlayers) {
+		// mob_ai (disable_ai_when_no_players_nearby) is DISABLED at the
+		// plugin level: its invulnerability logic was inverted and its
+		// per-mob proximity scan added more tick cost than it saved.
+		// Intentionally not registered regardless of config.
+		if (false && mobAiDisableWhenNoPlayers) {
 			mobAIListener = new MobAIListener(
 				plugin,
 				mobAiRadius

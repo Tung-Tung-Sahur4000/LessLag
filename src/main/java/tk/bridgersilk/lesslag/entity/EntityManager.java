@@ -49,7 +49,11 @@ public class EntityManager {
 	private void startTasks() {
 		chunkAndWorldCheckTask = Bukkit.getScheduler().runTaskTimer(plugin, this::checkEntities, 0L, 200L);
 
-		smartRemovalTask = Bukkit.getScheduler().runTaskTimer(plugin, this::smartEntityRemoval, 0L, 6000L);
+		// smart_entity_removal is DISABLED at the plugin level. Its logic
+		// deleted every entity of the most common type across all worlds
+		// every 5 minutes with no TPS or overpopulation check, which wipes
+		// farms even at full TPS. The safe world/chunk soft-caps above
+		// (checkEntities) remain active. See smartEntityRemoval() below.
 	}
 
 	public void stopTasks() {
@@ -93,6 +97,11 @@ public class EntityManager {
 	}
 
 	private void smartEntityRemoval() {
+		// Hard-disabled at the plugin level regardless of config: the
+		// original behavior mass-deleted entities unconditionally and was
+		// destructive to farms. Left in place (unscheduled) for reference.
+		if (true) return;
+
 		if (!smartRemovalEnabled) return;
 
 		Map<String, AtomicInteger> entityCountMap = new HashMap<>();

@@ -11,6 +11,7 @@ import java.util.stream.Collectors;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
+import org.bukkit.Sound;
 import org.bukkit.World;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.entity.Entity;
@@ -118,29 +119,32 @@ public class ItemManagement implements Listener {
     private void startStackingTask() {
         if (!stackingEnabled) return;
 
+        // Runs every 20 ticks (1s). Only item entities are queried
+        // (getEntitiesByClass) instead of scanning every entity in the
+        // world, to keep this feature's own overhead low on drop-heavy
+        // servers.
         stackTask = Bukkit.getScheduler().runTaskTimer(plugin, () -> {
             for (World world : Bukkit.getWorlds()) {
-                for (Entity entity : world.getEntities()) {
-                    if (entity instanceof Item item && !item.isDead()) {
+                for (Item item : world.getEntitiesByClass(Item.class)) {
+                    if (item.isDead()) continue;
 
-                        if (!stackedAmounts.containsKey(item.getUniqueId())) {
-                            int totalAmount = item.getItemStack().getAmount();
+                    if (!stackedAmounts.containsKey(item.getUniqueId())) {
+                        int totalAmount = item.getItemStack().getAmount();
 
-                            ItemStack newStack = item.getItemStack().clone();
-                            newStack.setAmount(1);
-                            newStack = tagStackedItem(newStack);
+                        ItemStack newStack = item.getItemStack().clone();
+                        newStack.setAmount(1);
+                        newStack = tagStackedItem(newStack);
 
-                            item.setItemStack(newStack);
+                        item.setItemStack(newStack);
 
-                            stackedAmounts.put(item.getUniqueId(), totalAmount);
-                            updateHologram(item);
-                        }
-
-                        stackNearbyItems(item);
+                        stackedAmounts.put(item.getUniqueId(), totalAmount);
+                        updateHologram(item);
                     }
+
+                    stackNearbyItems(item);
                 }
             }
-        }, 0L, 10L);
+        }, 0L, 20L);
     }
 
     private void stopStackingTask() {
@@ -358,6 +362,13 @@ public class ItemManagement implements Listener {
             HashMap<Integer, ItemStack> leftovers = player.getInventory().addItem(createItemWithAmount(cleanedItem, totalAmount));
             int pickedUp = totalAmount - leftovers.values().stream().mapToInt(ItemStack::getAmount).sum();
 
+            if (pickedUp > 0) {
+                // The vanilla pickup event is cancelled below, which
+                // suppresses the normal "pop" sound. Replay it manually
+                // so stacked pickups aren't silent.
+                playPickupSound(player);
+            }
+
             if (pickedUp >= totalAmount) {
                 stackedAmounts.remove(id);
                 item.remove();
@@ -371,6 +382,7 @@ public class ItemManagement implements Listener {
 
             if (simulatedLeftovers.isEmpty()) {
                 player.getInventory().addItem(testStack);
+                playPickupSound(player);
                 stackedAmounts.remove(id);
                 item.remove();
             } else {
@@ -379,6 +391,13 @@ public class ItemManagement implements Listener {
         }
 
         event.setCancelled(true);
+    }
+
+    // Reproduces the vanilla item-pickup sound. Needed because stacked
+    // pickups cancel the original event (which normally plays this).
+    private void playPickupSound(Player player) {
+        float pitch = (float) ((Math.random() - Math.random()) * 0.7 + 2.0);
+        player.playSound(player.getLocation(), Sound.ENTITY_ITEM_PICKUP, 0.2f, pitch);
     }
 
 	private ItemStack createItemWithAmount(ItemStack itemStack, int amount) {
