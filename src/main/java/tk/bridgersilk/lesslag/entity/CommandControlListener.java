@@ -20,17 +20,16 @@ public class CommandControlListener implements Listener {
 
     @EventHandler
     public void onPlayerCommand(PlayerCommandPreprocessEvent event) {
-        String prefix = entityManager.getPlugin().getConfig().getString("settings.prefix");
+        if (!event.getMessage().toLowerCase().startsWith("/summon")) return;
 
-        if (event.getMessage().toLowerCase().startsWith("/summon")) {
-            Location loc = event.getPlayer().getLocation();
-            Chunk chunk = loc.getChunk();
-            World world = loc.getWorld();
+        Location loc = event.getPlayer().getLocation();
+        Chunk chunk = loc.getChunk();
+        World world = loc.getWorld();
 
-            if (entityManager.isOverEntityLimit(chunk, world)) {
-                event.setCancelled(true);
-                event.getPlayer().sendMessage(prefix + "§cEntity limit reached! You can't summon entities here.");
-            }
+        if (entityManager.isOverEntityLimit(chunk, world)) {
+            event.setCancelled(true);
+            String prefix = entityManager.getPlugin().getConfig().getString("settings.prefix");
+            event.getPlayer().sendMessage(prefix + "§cEntity limit reached! You can't summon entities here.");
         }
     }
 
