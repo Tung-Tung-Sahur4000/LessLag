@@ -61,11 +61,7 @@ public class ExplosionListener implements Listener {
 			return;
 		}
 
-		double[] recentTps = Bukkit.getTPS();
-
-		double currentTps = recentTps.length > 0
-			? recentTps[0]
-			: 20.0;
+		double currentTps = TPSUtil.getResponsiveTPS();
 
 		if (currentTps > tpsThreshold) {
 			return;

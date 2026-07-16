@@ -19,23 +19,23 @@ public class SpawnControlListener implements Listener {
 
     @EventHandler
     public void onPlayerUseSpawnEgg(PlayerInteractEvent event) {
-        String prefix = entityManager.getPlugin().getConfig().getString("settings.prefix");
-
+        // Guards ordered cheapest-first; the prefix (a config read) is only
+        // fetched when we actually cancel, not on every interaction.
         if (event.getAction() != Action.RIGHT_CLICK_BLOCK && event.getAction() != Action.RIGHT_CLICK_AIR)
             return;
 
         ItemStack item = event.getItem();
         if (item == null) return;
+        if (!item.getType().name().endsWith("_SPAWN_EGG")) return;
 
-        if (item.getType().name().endsWith("_SPAWN_EGG")) {
-            Location loc = event.getClickedBlock() != null ? event.getClickedBlock().getLocation() : event.getPlayer().getLocation();
-            Chunk chunk = loc.getChunk();
-            World world = loc.getWorld();
+        Location loc = event.getClickedBlock() != null ? event.getClickedBlock().getLocation() : event.getPlayer().getLocation();
+        Chunk chunk = loc.getChunk();
+        World world = loc.getWorld();
 
-            if (entityManager.isOverEntityLimit(chunk, world)) {
-                event.setCancelled(true);
-                event.getPlayer().sendMessage(prefix + "§cEntity limit reached! You can't spawn more entities here.");
-            }
+        if (entityManager.isOverEntityLimit(chunk, world)) {
+            event.setCancelled(true);
+            String prefix = entityManager.getPlugin().getConfig().getString("settings.prefix");
+            event.getPlayer().sendMessage(prefix + "§cEntity limit reached! You can't spawn more entities here.");
         }
     }
 }

@@ -66,13 +66,34 @@ packet-spam protection, and the profiler ON — everything broken OFF.
 (`clocks_only: false` to match real behavior; `web_interface: false`.)
 
 ## Known issues NOT yet fixed (optional future work)
-- `Bukkit.getScheduler().cancelTasks(plugin)` in `WorldManager.disable()`
-  and `Profiler.disable()` cancels **every** plugin task, not just their
-  own — fragile on `/ll reload`. Prefer restart over reload for now.
-- Stacked item amounts live in memory only → ground stacks can lose their
-  count across a server restart. Should be persisted (e.g. PDC).
-- Reactive features use 1-minute-average TPS; a shorter/MSPT-based signal
-  would react to spikes.
+- (none of the previously-listed items remain — see below)
+
+## Recently fixed on this branch
+- **Reactive features are now spike-aware.** `TPSUtil` is the single lag
+  signal: it derives an instantaneous TPS from MSPT
+  (`Bukkit.getAverageTickTime()`, ~5s window) and the reactive gate fires
+  when **either** that or the 1-minute average is below threshold (a strict
+  superset of the old behaviour — more reactive, never less). Redstone,
+  fluids, falling-blocks, ender-pearls, command-blocks, explosion
+  event-cancel, the explosion queue, and tickspeed reduction all route
+  through `TPSUtil.getResponsiveTPS()` now. The drastic world
+  force-unload/teleport intentionally stays on the **sustained** 1-minute
+  average (`TPSUtil.getAverageTPS()`) so a momentary spike can't teleport
+  everyone. Config thresholds are unchanged.
+- **`cancelTasks(plugin)` no longer nukes every task.** `WorldManager` and
+  `Profiler` now hold their own `BukkitTask` handles and cancel only those
+  in `disable()`, so `/ll reload` no longer tears down unrelated features.
+- **Stacked item amounts now persist** (`item/ItemManagement.java`). The
+  count is mirrored onto the item **entity's** PersistentDataContainer
+  (`lesslag:stack_amount`, INTEGER), which is saved to disk with the
+  chunk. On restart/reload the stacking task recovers the count from the
+  entity instead of resetting it to 1, so ground stacks no longer lose
+  their amount (hologram said "x64", pickup gave 1). All map writes now go
+  through `setStackedAmount`/`clearStackedAmount` helpers that keep the
+  in-memory map and the PDC in sync.
+- Also fixed: `reload()` stopped the stacking task but never restarted it
+  (stacking silently died after `/ll reload`); it now restarts and
+  recovers amounts from PDC. `disable()` now stops the stacking task too.
 
 ## Current task / where we stopped
 Learning to use the **spark** profiler to find the *real* lag source.

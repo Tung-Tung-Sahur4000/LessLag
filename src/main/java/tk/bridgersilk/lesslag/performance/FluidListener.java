@@ -1,8 +1,7 @@
 package tk.bridgersilk.lesslag.performance;
 
 import org.bukkit.Bukkit;
-import org.bukkit.block.Block;
-import org.bukkit.configuration.file.FileConfiguration;
+import org.bukkit.Material;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockFromToEvent;
@@ -10,30 +9,27 @@ import org.bukkit.plugin.Plugin;
 
 public class FluidListener implements Listener {
 
-	private final Plugin plugin;
-	private final FileConfiguration config;
     private final double tpsThreshold;
 
-	public FluidListener(Plugin plugin, double tpsThreshold) {
-		this.plugin = plugin;
+    public FluidListener(Plugin plugin, double tpsThreshold) {
         this.tpsThreshold = tpsThreshold;
-		this.config = plugin.getConfig();
         Bukkit.getPluginManager().registerEvents(this, plugin);
-	}
+    }
 
-	@EventHandler
-	public void onFluidFlow(BlockFromToEvent event) {
-		if (!config.getBoolean("performance_controls.disable_fluids.enabled")) return;
+    @EventHandler
+    public void onFluidFlow(BlockFromToEvent event) {
+        // BlockFromToEvent is a hot path (a lava pyramid or drained monument
+        // fires it thousands of times per tick). This listener is only
+        // registered while the feature is enabled, so there is no per-event
+        // config lookup; the responsive-TPS gate short-circuits when healthy,
+        // and the type check is an enum compare with no String allocation.
+        if (TPSUtil.getResponsiveTPS() > tpsThreshold) return;
 
-		double tps = Bukkit.getServer().getTPS()[0];
-		if (tps > tpsThreshold) return;
-
-		Block block = event.getBlock();
-		String typeName = block.getType().name();
-		if (typeName.contains("WATER") || typeName.contains("LAVA")) {
-			event.setCancelled(true);
-		}
-	}
+        Material type = event.getBlock().getType();
+        if (type == Material.WATER || type == Material.LAVA) {
+            event.setCancelled(true);
+        }
+    }
 
     public void unregister() {
         BlockFromToEvent.getHandlerList().unregister(this);
