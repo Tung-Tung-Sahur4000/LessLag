@@ -25,7 +25,7 @@ public class CommandBlockListener implements Listener {
 	public void onCommandBlockExecute(ServerCommandEvent event) {
 		if (!config.getBoolean("performance_controls.disable_command_blocks.enabled")) return;
 
-		double tps = Bukkit.getServer().getTPS()[0];
+		double tps = TPSUtil.getResponsiveTPS();
 		if (tps > tpsThreshold) return;
 
 		if (event.getSender() instanceof BlockCommandSender) {

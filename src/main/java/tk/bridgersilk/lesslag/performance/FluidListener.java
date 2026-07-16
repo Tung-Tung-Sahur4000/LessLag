@@ -25,7 +25,7 @@ public class FluidListener implements Listener {
 	public void onFluidFlow(BlockFromToEvent event) {
 		if (!config.getBoolean("performance_controls.disable_fluids.enabled")) return;
 
-		double tps = Bukkit.getServer().getTPS()[0];
+		double tps = TPSUtil.getResponsiveTPS();
 		if (tps > tpsThreshold) return;
 
 		Block block = event.getBlock();

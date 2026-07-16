@@ -10,6 +10,7 @@ import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.scheduler.BukkitTask;
 
 import tk.bridgersilk.lesslag.LessLag;
+import tk.bridgersilk.lesslag.performance.TPSUtil;
 
 public class ExplosionQueueManager {
 
@@ -283,16 +284,9 @@ public class ExplosionQueueManager {
 	}
 
 	private double getCurrentTps() {
-		double[] recentTps = Bukkit.getTPS();
-
-		if (recentTps.length == 0) {
-			return 20.0;
-		}
-
-		return Math.max(
-			0.0,
-			Math.min(20.0, recentTps[0])
-		);
+		// Spike-aware signal so the queue kicks in on short lag bursts,
+		// not only on sustained 1-minute-average drops.
+		return TPSUtil.getResponsiveTPS();
 	}
 
 	private boolean isConfiguredEnabled() {

@@ -28,7 +28,7 @@ public class FallingBlockListener implements Listener {
 	public void onBlockPhysics(BlockPhysicsEvent event) {
 		if (!config.getBoolean("performance_controls.disable_falling_blocks.enabled")) return;
 
-		double tps = Bukkit.getServer().getTPS()[0];
+		double tps = TPSUtil.getResponsiveTPS();
 		if (tps > tpsThreshold) return;
 
 		Block block = event.getBlock();
@@ -42,7 +42,7 @@ public class FallingBlockListener implements Listener {
 	public void onEntitySpawn(EntitySpawnEvent event) {
 		if (!config.getBoolean("performance_controls.disable_falling_blocks.enabled")) return;
 
-		double tps = Bukkit.getServer().getTPS()[0];
+		double tps = TPSUtil.getResponsiveTPS();
 		if (tps > tpsThreshold) return;
 
 		if (event.getEntityType() == EntityType.FALLING_BLOCK) {

@@ -29,7 +29,7 @@ public class EnderPearlListener implements Listener {
 	public void onPearlLaunch(ProjectileLaunchEvent event) {
 		if (!config.getBoolean("performance_controls.disable_ender_pearls.enabled")) return;
 
-		double tps = Bukkit.getServer().getTPS()[0];
+		double tps = TPSUtil.getResponsiveTPS();
 		if (tps > tpsThreshold) return;
 
 		if (event.getEntity() instanceof EnderPearl) {
@@ -44,7 +44,7 @@ public class EnderPearlListener implements Listener {
 
 		if (!config.getBoolean("performance_controls.disable_ender_pearls.enabled")) return;
 
-		double tps = Bukkit.getServer().getTPS()[0];
+		double tps = TPSUtil.getResponsiveTPS();
 		if (tps > tpsThreshold) return;
 
 		Player player = event.getPlayer();

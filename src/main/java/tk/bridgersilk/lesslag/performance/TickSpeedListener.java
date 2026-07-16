@@ -34,7 +34,7 @@ public class TickSpeedListener {
             public void run() {
                 if (!config.getBoolean("performance_controls.decrease_tickspeed.enabled")) return;
 
-                double tps = Bukkit.getServer().getTPS()[0];
+                double tps = TPSUtil.getResponsiveTPS();
 
                 if (tps < tpsThreshold) {
                     if (!changeTickSpeed) {

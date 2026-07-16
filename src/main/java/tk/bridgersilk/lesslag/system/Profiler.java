@@ -12,6 +12,7 @@ import org.bukkit.boss.BossBar;
 import org.bukkit.command.CommandSender;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.entity.Player;
+import org.bukkit.scheduler.BukkitTask;
 
 import com.comphenix.protocol.PacketType;
 import com.comphenix.protocol.ProtocolLibrary;
@@ -29,6 +30,8 @@ public class Profiler {
 
     private long totalIncomingPackets = 0;
     private long totalOutgoingPackets = 0;
+
+    private BukkitTask updateTask;
 
     private boolean blinkToggle = false;
     private final boolean enabled;
@@ -134,7 +137,7 @@ public class Profiler {
     }
 
     private void startUpdating() {
-        Bukkit.getScheduler().runTaskTimer(plugin, () -> {
+        updateTask = Bukkit.getScheduler().runTaskTimer(plugin, () -> {
             blinkToggle = !blinkToggle;
 
             double tps = Bukkit.getServer().getTPS()[0];
@@ -229,7 +232,11 @@ public class Profiler {
         }
         viewers.clear();
 
-        Bukkit.getScheduler().cancelTasks(plugin);
+        // Cancel only the profiler's own update task, not every plugin task.
+        if (updateTask != null) {
+            updateTask.cancel();
+            updateTask = null;
+        }
 
         ProtocolLibrary.getProtocolManager().getPacketListeners().stream()
             .filter(listener -> listener.getPlugin().equals(plugin))
