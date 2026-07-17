@@ -61,8 +61,37 @@ world_management:
 # Item management
 # ----------------------------------------------------------
 item_management:
-  auto_clear_drops:                  # [OK] periodic ground-item wipe
+  drop_timer:                        # [OK] per-item countdown despawn
+    # Give each dropped item its OWN visible countdown, then remove it when
+    # the timer runs out — instead of wiping every drop at once on a fixed
+    # interval (that's auto_clear_drops below, off by default). Drop a block
+    # of dirt and it shows e.g. "Dirt x64 (30s)" ticking down to 0.
+    # Uses the entity's own age, so the timer survives restart/reload.
     enabled: true
+    # Seconds a dropped item lives before it is removed.
+    despawn_seconds: 30
+    # Append the live countdown to the item's hologram.
+    show_in_hologram: true
+    # Items that never expire (stay on the ground forever).
+    whitelist:
+      - diamond
+      - nether_star
+
+  hologram:                          # [OK] hologram load protection
+    enabled: true
+    # Above this many item entities in a world, refresh holograms only every
+    # few seconds instead of every second (cuts entity-metadata packet spam
+    # while mining or at a busy farm).
+    throttle_above: 150
+    throttled_refresh_seconds: 5
+    # Above this many item entities in a world, hide item holograms entirely.
+    hide_above: 400
+
+  auto_clear_drops:                  # periodic ground-item wipe (legacy)
+    # Off by default — drop_timer above is the recommended replacement. If
+    # you enable this too, it will still bulk-clear every drop on the
+    # interval in addition to the per-item timer.
+    enabled: false
     # How often (seconds) all non-whitelisted dropped items are cleared.
     interval_seconds: 240
     # Items that are never auto-cleared
@@ -82,6 +111,7 @@ item_management:
     #   {item_type} = type (e.g. "Diamond")
     #   {item_name} = custom name if renamed, else same as {item_type}
     #   {amount}    = total amount in the stack
+    # The drop_timer countdown (if enabled) is appended automatically.
     hologram_format: "§e{item_name}§f x{amount}"
     # "partial" = pick up only what fits; "full" = all-or-nothing.
     pickup_behavior: "partial"

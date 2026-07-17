@@ -84,6 +84,25 @@ sustained lag, misses spikes) — has been **fixed** (see below).
    `clocks_only: false`, `web_interface.enabled: false`, explosion
    `low_tps_only.enabled: true`, `force_unload_on_low_tps.enabled: false`);
    documents that every `disable_below_tps` is now spike-aware.
+8. **CI JDK 21** — the workflow built on JDK 17, but Paper 1.21.x is Java-21
+   bytecode, so every `org.bukkit.*` symbol was "not found". Bumped the
+   workflow to Temurin 21. CI is now green and uploads `LessLag-plugin`.
+9. **Per-item drop timer + hologram load control** (`item/ItemManagement.java`,
+   config `item_management.drop_timer` + `item_management.hologram`):
+   - Each dropped item gets its own visible countdown (default 30s) shown in
+     the hologram (e.g. `Dirt x64 §7(30s)`) and is removed when it expires —
+     replacing the all-at-once `auto_clear_drops` (now off by default). The
+     timer uses the entity's own age (`getTicksLived`), so it survives
+     restart/reload; a per-item whitelist never expires.
+   - Merging refreshes the stack to the freshest item's age, so fresh drops
+     aren't cut short by an old pile; an idle pile still expires.
+   - Hologram throttle: per world, `> throttle_above` items → refresh
+     holograms every `throttled_refresh_seconds` instead of every second;
+     `> hide_above` → hide holograms entirely. Cuts entity-metadata packet
+     spam while mining / at farms.
+   - Ghost cleanup: `despawnItem()` clears the hologram before removing so no
+     stale name lingers, and each pass prunes tracking-map entries for items
+     no longer seen (safe — the count is re-adopted from the entity PDC).
 
 ## Re-audit status (all changes verified)
 - `mvn -o clean compile` / `package -DskipTests` → BUILD SUCCESS (only a
@@ -96,13 +115,15 @@ sustained lag, misses spikes) — has been **fixed** (see below).
 - config.yml validated as well-formed YAML.
 
 ## Known issues NOT yet fixed (optional future work)
-- **Item-stacking spatial pass** (`ItemManagement` stacking task) is the one
+- **Item-stacking spatial pass** (`ItemManagement` maintenance task) is the one
   remaining O(N) cost: `getNearbyEntities()` per item entity once per second.
-  It self-limits in practice (stacking collapses items into few entities), but
-  a pathological farm (many non-mergeable, spread-out item types) could make N
-  large. Clean fix if needed: spread the pass across ticks with a per-tick
-  budget + round-robin cursor. Left undone deliberately — the amount/hologram
-  bookkeeping is easy to break and needs an in-game verify.
+  It self-limits in practice (stacking collapses items into few entities, and
+  the drop timer now caps how long items live), but a pathological farm (many
+  non-mergeable, spread-out item types) could still make N large. Clean fix if
+  needed: spread the pass across ticks with a per-tick budget + round-robin
+  cursor. Left undone deliberately — the amount/hologram/timer bookkeeping is
+  easy to break and needs an in-game verify. Note the hologram cost of that
+  scenario is already handled (throttle/hide above configurable item counts).
 - No changes have been **live-tested on a running server** — verified by
   compile + inspection + static analysis only. Worth an in-game check of:
   stacked-item count surviving `/reload` + restart; a simulated spike tripping
