@@ -1,237 +1,270 @@
 # ==========================================================
 #  LessLag Configuration File
-#  This plugin helps reduce server and client lag by using
-#  various performance optimizations. Each section below
-#  can be enabled or disabled and customized.
+# ==========================================================
+#  This plugin reduces server/client lag with several
+#  performance features. Each section can be toggled and tuned.
+#
+#  LEGEND (status of each feature, from the code audit):
+#    [OK]        Works as intended, safe to run.
+#    [OFF]       Disabled at the PLUGIN level regardless of this file
+#                (the code was broken/destructive). The toggle is kept
+#                only so the file stays stable; flipping it does nothing.
+#    [TODO]      Config exists but NO code reads it yet — has no effect.
+#
+#  Reactive threshold note:
+#    Every "disable_below_tps" now reacts to SHORT LAG SPIKES, not just
+#    sustained lag. Internally the trigger fires when EITHER the
+#    instantaneous MSPT-based TPS OR the 1-minute average drops below the
+#    threshold. Set a value >20 to make that feature effectively always-on.
 # ==========================================================
 
 # Permissions:
-# - lesslag.admin (main permission for using the lesslag command and features)
+# - lesslag.admin (main permission for the /lesslag command and admin notices)
 
 settings:
   # Prefix for all chat messages sent by the plugin
   prefix: "§7[§cLessLag§7] §r"
-  # How often (in ticks) the plugin checks server TPS.
-  # 20 ticks = 1 second
+  # How often (in ticks) periodic checks run. 20 ticks = 1 second.
   tps_check_interval: 20
-  
-  # When TPS drops below this number, certain lag-prevention
-  # features will start activating.
+
+  # General "server is under load" threshold used by some features.
   low_tps_threshold: 15.0
-  
-  # Critical TPS value; if the server goes this low,
-  # emergency optimizations (like unloading worlds) may trigger.
+
+  # Critical threshold. Drastic, hard-to-reverse actions (world
+  # force-unload + player transfer) use the SUSTAINED 1-minute average at
+  # this value on purpose, so a momentary spike can't teleport everyone.
   critical_tps_threshold: 10.0
 
+# ----------------------------------------------------------
+# World management
+# ----------------------------------------------------------
 world_management:
-  auto_unload:
+  auto_unload:                       # [OK] unload empty, inactive worlds
     enabled: true
-    # Wether to save worlds before unloading them
+    # Whether to save worlds before unloading them
     save_world: true
-    # Minutes of no players in a world before it gets unloaded
+    # Minutes with no players in a world before it gets unloaded
     inactivity_minutes: 5
     # Worlds that should never be auto-unloaded
     excluded_worlds:
       - world
       - lobby
 
-  force_unload_on_low_tps:
-    enabled: true
-    # When TPS is critically low, worlds with few/no players will
-    # unload automatically, and remaining players will be moved here:
+  force_unload_on_low_tps:           # [OK] emergency world unload
+    # Drastic: teleports players out and unloads worlds. Fires only on
+    # SUSTAINED low TPS (critical_tps_threshold), never on a single spike.
+    # Leave OFF unless you understand the impact.
+    enabled: false
     player_transfer_world: world
 
+# ----------------------------------------------------------
+# Item management
+# ----------------------------------------------------------
 item_management:
-  auto_clear_drops:
+  auto_clear_drops:                  # [OK] periodic ground-item wipe
     enabled: true
-    # How often (in seconds) all dropped items are cleared
+    # How often (seconds) all non-whitelisted dropped items are cleared.
     interval_seconds: 240
-    # Items that will never be removed automatically
+    # Items that are never auto-cleared
     whitelist:
       - diamond
       - nether_star
 
-  item_stacking:
+  item_stacking:                     # [OK] merges ground items into 1 entity
+    # Self-limiting under load: the more items drop, the more they merge,
+    # so the item-ENTITY count (and this feature's own cost) stays low.
+    # Stacked amounts now persist across restart/reload (stored on the item
+    # entity), so a "x2000" ground stack keeps its count.
     enabled: true
-    # Items dropped close to each other (within this radius) merge
+    # Items dropped within this radius merge together.
     stack_radius: 3.0
-    # Hologram text shown above stacked items.
-    # Placeholders:
-    #   {item_type}   = Type of the item (e.g., "Diamond")
-    #   {item_name}   = Name of the item (e.g., "OP Sword") (this is the same as {item_type} but shows the custom name of an item if it got renamed)
-    #   {amount} = Total amount in this stack
+    # Hologram text shown above stacked items. Placeholders:
+    #   {item_type} = type (e.g. "Diamond")
+    #   {item_name} = custom name if renamed, else same as {item_type}
+    #   {amount}    = total amount in the stack
     hologram_format: "§e{item_name}§f x{amount}"
-    # "partial" = pick up only what fits in inventory
-    # "full" = pick up entire stack or nothing
+    # "partial" = pick up only what fits; "full" = all-or-nothing.
     pickup_behavior: "partial"
 
+# ----------------------------------------------------------
+# Entity management (soft-cap)
+# ----------------------------------------------------------
 entity_management:
-  # Max number of entities allowed per chunk
+  # [OK] Soft-cap. Runs every 10s (not per-event), so cost is independent
+  # of spawn rate. Recommended mode: PAUSE spawning over the limit rather
+  # than deleting, so farms are never wiped.
   max_entities_per_chunk: 50
-  # Max number of entities allowed in an entire world
   max_entities_per_world: 5000
-  # If the max is reached, natural mob spawning stops
+  # When at the limit, stop natural mob spawning.
   disable_natural_spawn_on_limit: true
-  # Kill new entities that appear above the limit
-  kill_excess_entities: true
+  # Kill entities above the limit. Default OFF: pausing spawns (above) is
+  # safe, but killing can destroy farm mobs/drops. Turn on only if you
+  # accept that trade-off.
+  kill_excess_entities: false
 
-  smart_entity_removal:
-    # Uses advanced logic to kill the most frequent entity type if overpopulated
-    enabled: true
-    # Entities that never get killed even if overpopulated
+  smart_entity_removal:              # [OFF] mass-deleted farms, disabled in code
+    # The original logic deleted every entity of the most common type across
+    # ALL worlds every 5 min with no TPS/overpopulation check. Hard-disabled
+    # at the plugin level; this toggle has no effect.
+    enabled: false
     whitelist:
-    - villager
-    - wolf
-    - item
+      - villager
+      - wolf
+      - item
 
+# ----------------------------------------------------------
+# Player management
+# ----------------------------------------------------------
 player_management:
-  # Prevents more players from joining or entering a world if it's full
+  # [OK] Cap players per world; overflow is sent to the fallback world.
   max_players_per_world: 50
-  # The world, players get teleported in, when the max player limit in a world is exceeded (the world player limit is ignored in the fallback world)
   fallback_world: world
 
-  packet_spam_protection:
+  packet_spam_protection:            # [OK] anti-crash packet limiter
     enabled: true
-    # Number of packets a player can send per second before being punished
     packet_limit: 1000
-    # What to do if a player exceeds the limit: "kick" or "ban"
+    # "kick" or "ban"
     action: "kick"
-    # Reason for the kick/ban that gets displayed to the player when getting kicked/banned
     action_reason: "§cYou're sending way too many packets! Trying to crash the server!?"
 
-  chat_spam_protection:
+  chat_spam_protection:              # [OK]
     enabled: true
-    # If more than this amount of messages are sent in total, the chat gets temporarily muted for everyone (except players with permission lesslag.admin)
     max_messages_per_second: 6
-    # If chat is spammed heavily, it will be disabled for everyone temporarily
     mute_duration_seconds: 5
 
+# ----------------------------------------------------------
+# Reactive performance controls (all spike-aware now)
+# ----------------------------------------------------------
+# Each listener below is only registered when its "enabled" is true, and the
+# in-event work is near-zero until the server is actually lagging, so these
+# stay cheap even with big farms / redstone / lava builds.
 performance_controls:
-  disable_redstone:
+  disable_redstone:                  # [OK]
     enabled: true
-    # If true, only redstone clocks are disabled
-    # (fast-repeating circuits that cause lag)
-    clocks_only: true
-    # TPS threshold below which redstone is automatically disabled
-    disable_below_tps: 12.0 # set this value to >20 to always disable it (same thing for all other disable_below_tps options)
-
-  disable_falling_blocks:
-    enabled: true
-    # Prevents blocks like sand or gravel from turning into falling blocks
+    # NOTE: currently NOT honored. Below the threshold ALL redstone is
+    # disabled regardless of this value; kept false to match real behavior.
+    clocks_only: false
     disable_below_tps: 12.0
 
-  disable_fluids:
+  disable_falling_blocks:            # [OK] holds sand/gravel/concrete powder
     enabled: true
-    # Stops water and lava from flowing or being updated
     disable_below_tps: 12.0
 
-  disable_explosions:
+  disable_fluids:                    # [OK] freezes water/lava flow
     enabled: true
-    # Prevents TNT, creeper, or other explosions during heavy lag
+    disable_below_tps: 12.0
+
+  disable_explosions:                # [OK] cancels explosions during lag
+    enabled: true
     disable_below_tps: 10.0
 
-  disable_ender_pearls:
+  disable_ender_pearls:              # [OK]
     enabled: true
-    # Stops players from using ender pearls when TPS is low
     disable_below_tps: 10.0
 
-  disable_command_blocks:
+  disable_command_blocks:            # [OK]
     enabled: true
-    # Command blocks won't run if TPS are below this threshold
     disable_below_tps: 10.0
 
-  decrease_tickspeed:
+  decrease_tickspeed:                # [OK] lowers random tick speed under lag
     enabled: true
-    # The random tickspeed in all worlds will be decreased if TPS are below this threshold
     decrease_below_tps: 15.0
-    # The value which the random tickspeed will be changed to (vanilla: 3, most performant: 0)
+    # Value to drop random tick speed to (vanilla: 3, most performant: 0)
     decrease_to: 0
 
+# ----------------------------------------------------------
+# Mob AI freeze  ->  [OFF] disabled in code
+# ----------------------------------------------------------
 mob_ai:
   disable_ai_when_no_players_nearby:
+    # Inverted invulnerability logic + a per-mob proximity scan that cost
+    # more than it saved. Hard-disabled at the plugin level; no effect.
     enabled: false
-    # Distance around mobs (in blocks) to check for nearby players
-    # If no players are within this radius, mobs will freeze and stop pathfinding
     radius: 32
-    # Whether mobs shouldn't take damage while their AI is disabled (recommended, otherwise players could abuse this feature and go far away from mobs and kill them with a ranged weapon)
     invulnerable: true
 
+# ----------------------------------------------------------
+# Chunk-loading throttle  ->  [OFF] disabled in code
+# ----------------------------------------------------------
 chunk_loading:
   throttle_on_fast_player_movement:
+    # Force-unloaded chunks the engine was actively loading, fighting the
+    # server. Hard-disabled at the plugin level; no effect.
     enabled: false
-    # If a player moves very fast and loads too many chunks
-    # while TPS is dropping, chunk loading will be disabled
-    # for this amount of seconds to let the server recover
     disable_duration_seconds: 5
-    # Total maximum amount of chunks that can be loaded per second on the server (not per player)
     max_chunks_per_second: 500
 
+# ----------------------------------------------------------
+# In-game profiler bossbar (/lesslag profiler)  ->  [OK]
+# ----------------------------------------------------------
 profiler:
   enabled: true
-  # How often the profiler updates (in ticks)
   update_interval_ticks: 20
-  # Show CPU usage in profiler
   show_cpu_usage: true
-  # Show RAM usage in profiler
   show_ram_usage: true
-  # Show number of packets sent and received in profiler
+  # Counts packets via ProtocolLib. Shown only to bossbar viewers.
   show_packets: true
 
-web_interface:
+# ----------------------------------------------------------
+# Explosion queue  ->  [OK] spreads explosions across ticks
+# ----------------------------------------------------------
+explosion_queue:
   enabled: true
+  explosions_per_tick: 5
+  # Low TPS = fewer explosions per tick, and vice versa.
+  dynamic_scaling: true
+  low_tps_only:
+    # When true, only queue while lagging (uses the spike-aware signal).
+    enabled: true
+    tps_below: 15.0
+  queue_types:
+    tnt: true
+    creeper: true
+    end_crystal: false
+    bed: true
+    respawn_anchor: true
+    ghast_fireball: false
+    wither_skull: false
+  bypass_worlds:
+    - pvp_world
+    - practice
+  limits:
+    max_queue_size: 500
+    cancel_new_explosions_when_full: true
 
-  # Where the web interface for lag detection reports and profiler should be hosted and on which port
+# ==========================================================
+#  WEB / REPORTING / HISTORY  ->  [TODO] not implemented yet
+#  These sections are read by NO code and currently have no effect. They are
+#  kept as a spec for future work. web_interface pages are static
+#  placeholders and SSL is unimplemented, so it is shipped OFF.
+# ==========================================================
+web_interface:
+  enabled: false                     # [TODO] placeholder pages only
   host: "0.0.0.0"
   port: 25580
-
   authentication:
-    # Whether the web interface should be secured with a password and user (recommended)
     enabled: false
-
     username: admin
-    password: 123
-
+    password: changeme               # change if you ever enable this
   ssl:
-    # Whether secure sockets layer should be enabled
     enabled: false
-
-  # Time until a web interface session is suspended
   session_timeout_minutes: 60
-
-  # Generate and send access links to the player in the chat when a web interface session is started via in game commands
   generate_access_links: true
-
-  # Time until an access link is no longer usable
   access_link_expiration_minutes: 30
 
-# Command: /lesslag web reports
-lag_reports:
-  enabled: true
-
-  # Conditions for a lag report to be generated
+lag_reports:                         # [TODO] no code reads this
+  enabled: false
   trigger:
     tps_below: 15.0
-
     duration_seconds: 15
-
-  # Time after a lag report in which no new lag report can be generated
   cooldown_minutes: 10
-
-  # How to notify admins when a lag report is generated
   notifications:
     chat_message: true
     action_bar: false
-
     permission: lesslag.admin
-
-  # Save lag reports to a database
   storage:
     save_reports: true
-
-    # Time until a lag report is deleted (in days)
     retention_days: 180
-
-  # Which metrics to analyze as a possible lag cause
   analysis:
     entity_count: true
     dropped_items: true
@@ -241,85 +274,28 @@ lag_reports:
     hoppers: true
     redstone: true
     loaded_worlds_count: true
-    recent_player_commands: true # amount and full commands + player names (useful for abused exploits)
+    recent_player_commands: true
 
-explosion_queue:
-  enabled: true
-
-  # Maximum explosions processed each tick
-  explosions_per_tick: 5
-
-  # Whether to use dynamic scaling based on TPS (low TPS = lower explosions per tick, vice versa)
-  dynamic_scaling: true
-
-  # Only queue explosions when TPS are low
-  low_tps_only:
-    enabled: false
-
-    tps_below: 15.0
-
-  # Which explosions to queue
-  queue_types:
-    tnt: true
-    creeper: true
-    end_crystal: false
-    bed: true
-    respawn_anchor: true
-    ghast_fireball: false
-    wither_skull: false
-
-  # Worlds in which explosions shouldn't be queued
-  bypass_worlds:
-    - pvp_world
-    - practice
-
-  limits:
-    # Maximum explosions in queue
-    max_queue_size: 500
-
-    # Whether new explosions shouldn't be processed at all when the queue is full
-    cancel_new_explosions_when_full: true
-
-# Command: /lesslag web profiler
-task_profiler:
-  # Whether the task profiler, showing live bukkit and plugin tasks, should be enabled/usable
-  enabled: true
-
+task_profiler:                       # [TODO] no code reads this
+  enabled: false
   sampling:
-    # Interval between tasks being re-checked and displayed
     interval_ticks: 1
-
-  # Which tasks to track
   tracking:
     sync_tasks: true
     async_tasks: true
-
   data:
     retain_sessions: 25
-
   alerts:
     enabled: true
-
-    # Amount of MSPT per plugin before notifying admins (lesslag.admin)
-    # If a plugin exceeds this threshold, admins will be notified while the task profiler is running
     warning_ms_per_tick: 5.0
 
-# Command: /lesslag web history
-performance_history:
-  enabled: true
-
-  # How often performance metrics are collected
+performance_history:                 # [TODO] no code reads this
+  enabled: false
   collection_interval_minutes: 2
-
-  # Number of days to keep historical data
   retention_days: 180
-
-  # This is where performance data is saved
   database:
     type: sqlite
     file: performance.db
-
-  # Which metrics to collect and save
   metrics:
     tps: true
     mspt: true
