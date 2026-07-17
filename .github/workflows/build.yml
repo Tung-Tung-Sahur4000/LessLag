@@ -20,11 +20,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up JDK 17
+      - name: Set up JDK 21
+        # Paper 1.21.x is compiled for Java 21 (class-file major version 65),
+        # so the build JDK must be 21+ or javac can't read the Paper API and
+        # every org.bukkit.* type fails with "cannot find symbol".
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: "21"
           cache: maven
 
       - name: Build with Maven
