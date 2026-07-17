@@ -89,11 +89,15 @@ sustained lag, misses spikes) — has been **fixed** (see below).
    workflow to Temurin 21. CI is now green and uploads `LessLag-plugin`.
 9. **Per-item drop timer + hologram load control** (`item/ItemManagement.java`,
    config `item_management.drop_timer` + `item_management.hologram`):
-   - Each dropped item gets its own visible countdown (default 30s) shown in
-     the hologram (e.g. `Dirt x64 §7(30s)`) and is removed when it expires —
-     replacing the all-at-once `auto_clear_drops` (now off by default). The
-     timer uses the entity's own age (`getTicksLived`), so it survives
-     restart/reload; a per-item whitelist never expires.
+   - Each dropped item gets its own countdown (default 30s) and is removed
+     when it expires — replacing the all-at-once `auto_clear_drops` (now off
+     by default). The timer uses the entity's own age (`getTicksLived`), so it
+     survives restart/reload; a per-item whitelist never expires.
+   - The ticking number only shows in the final `countdown_seconds` (default
+     10) before despawn — above that the hologram is static (`Dirt x64`), then
+     `Dirt x64 §7(10s)` counts down as an about-to-expire warning. This avoids
+     repainting every item's hologram every second for its whole life; set
+     `countdown_seconds >= despawn_seconds` to always show it.
    - Merging refreshes the stack to the freshest item's age, so fresh drops
      aren't cut short by an old pile; an idle pile still expires.
    - Hologram throttle: per world, `> throttle_above` items → refresh

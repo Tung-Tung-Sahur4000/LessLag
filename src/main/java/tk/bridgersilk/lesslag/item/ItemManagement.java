@@ -53,6 +53,7 @@ public class ItemManagement implements Listener {
 	private boolean dropTimerEnabled;
 	private int despawnTicks;
 	private boolean showTimerInHologram;
+	private int countdownSeconds;
 	private Set<Material> dropTimerWhitelist;
 
 	// Hologram throttling for drop-heavy situations (mining, farms).
@@ -92,6 +93,7 @@ public class ItemManagement implements Listener {
 		dropTimerEnabled = config.getBoolean("item_management.drop_timer.enabled", true);
 		despawnTicks = Math.max(1, config.getInt("item_management.drop_timer.despawn_seconds", 30)) * 20;
 		showTimerInHologram = config.getBoolean("item_management.drop_timer.show_in_hologram", true);
+		countdownSeconds = Math.max(0, config.getInt("item_management.drop_timer.countdown_seconds", 10));
 		dropTimerWhitelist = parseMaterials(config.getStringList("item_management.drop_timer.whitelist"));
 
 		hologramEnabled = config.getBoolean("item_management.hologram.enabled", true);
@@ -252,10 +254,15 @@ public class ItemManagement implements Listener {
             return;
         }
 
-        boolean tracked = stackedAmounts.containsKey(item.getUniqueId());
-        boolean timerShown = dropTimerEnabled && showTimerInHologram
+        boolean timerActive = dropTimerEnabled && showTimerInHologram
                 && !dropTimerWhitelist.contains(item.getItemStack().getType());
-        if (!tracked && !timerShown) return; // nothing to display
+
+        // The only thing that changes every second is the live countdown, and
+        // we only run that during the final countdownSeconds before despawn.
+        // Outside that window the hologram is static (already set on
+        // adopt/merge/pickup), so we skip the per-second repaint entirely —
+        // that's the bulk of the packet savings while mining or at a farm.
+        if (!timerActive || secondsLeft(item) > countdownSeconds) return;
 
         if (mode == HologramMode.THROTTLED && (passCount % throttledRefreshSeconds) != 0) return;
 
@@ -426,11 +433,17 @@ public class ItemManagement implements Listener {
 				.replace("{amount}", String.valueOf(amount))
 				.replace("{item_name}", this.itemName);
 
-		// Append the live countdown (e.g. "Dirt x64 §7(30s)") when the drop
-		// timer is showing for this item.
+		// Append the live countdown (e.g. "Dirt x64 §7(10s)") only in the
+		// final stretch before despawn (countdownSeconds); before that the
+		// hologram stays static so we're not repainting every item's name
+		// every second. Set countdown_seconds >= despawn_seconds to always
+		// show it.
 		if (dropTimerEnabled && showTimerInHologram
 				&& !dropTimerWhitelist.contains(item.getItemStack().getType())) {
-			displayName += " " + ChatColor.GRAY + "(" + secondsLeft(item) + "s)";
+			int secs = secondsLeft(item);
+			if (secs <= countdownSeconds) {
+				displayName += " " + ChatColor.GRAY + "(" + secs + "s)";
+			}
 		}
 
 		item.setCustomName(displayName);

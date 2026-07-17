@@ -72,6 +72,12 @@ item_management:
     despawn_seconds: 30
     # Append the live countdown to the item's hologram.
     show_in_hologram: true
+    # Only show the ticking countdown in the FINAL N seconds before despawn.
+    # Before that the hologram is static ("Dirt x64"); in the last N seconds
+    # the number appears and counts down ("Dirt x64 (10s)") as an
+    # about-to-expire warning. This avoids repainting every item's hologram
+    # every second. Set >= despawn_seconds to always show the countdown.
+    countdown_seconds: 10
     # Items that never expire (stay on the ground forever).
     whitelist:
       - diamond
