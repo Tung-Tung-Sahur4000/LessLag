@@ -131,7 +131,10 @@ entity_management:
   # than deleting, so farms are never wiped.
   max_entities_per_chunk: 50
   max_entities_per_world: 5000
-  # When at the limit, stop natural mob spawning.
+  # When a world has this many MOBS, pause natural spawning there until the
+  # count drops. Only living mobs count toward this gate -- dropped items, XP
+  # orbs, armor stands, item frames, boats, etc. do NOT -- so a busy farm's
+  # output can't switch off spawning for the whole world and starve farms.
   disable_natural_spawn_on_limit: true
   # Kill entities above the limit. Default OFF: pausing spawns (above) is
   # safe, but killing can destroy farm mobs/drops. Turn on only if you
