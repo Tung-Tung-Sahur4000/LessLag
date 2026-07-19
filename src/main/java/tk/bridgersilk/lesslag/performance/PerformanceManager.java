@@ -250,6 +250,11 @@ public class PerformanceManager {
 		}
 	}
 
+	/** The live villager optimizer, or null if disabled in config. */
+	public VillagerOptimizer getVillagerOptimizer() {
+		return villagerOptimizer;
+	}
+
 	public void disable() {
 		if (redstoneListener != null) {
 			redstoneListener.unregister();

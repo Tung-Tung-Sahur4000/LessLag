@@ -10,6 +10,7 @@ import org.bukkit.Bukkit;
 import org.bukkit.Chunk;
 import org.bukkit.Location;
 import org.bukkit.World;
+import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Mob;
@@ -30,6 +31,15 @@ public class EntityManager {
 	private boolean smartRemovalEnabled;
 	private List<String> smartRemovalWhitelist;
 
+	// Global per-type population caps for FARM / breedable mobs only. Above a
+	// type's limit, further breeding of that type is paused (never killed).
+	private boolean breedableCapsEnabled;
+	private Map<String, Integer> breedableLimits = new HashMap<>();
+	// Loaded population per capped type, refreshed by checkEntities (~10s).
+	// Replaced by reference on each pass; read on the main thread by the breed
+	// listener, so a plain field is enough.
+	private Map<String, Integer> liveTypeCounts = new HashMap<>();
+
 	public EntityManager(Plugin plugin) {
 		this.plugin = plugin;
 		loadConfigValues();
@@ -45,6 +55,15 @@ public class EntityManager {
 
 		this.smartRemovalEnabled = config.getBoolean("entity_management.smart_entity_removal.enabled", true);
 		this.smartRemovalWhitelist = config.getStringList("entity_management.smart_entity_removal.whitelist").stream().map(String::toUpperCase).toList();
+
+		this.breedableCapsEnabled = config.getBoolean("entity_management.breedable_global_limits.enabled", false);
+		this.breedableLimits = new HashMap<>();
+		ConfigurationSection limits = config.getConfigurationSection("entity_management.breedable_global_limits.limits");
+		if (limits != null) {
+			for (String key : limits.getKeys(false)) {
+				this.breedableLimits.put(key.toLowerCase(), limits.getInt(key));
+			}
+		}
 	}
 
 	private void startTasks() {
@@ -69,8 +88,23 @@ public class EntityManager {
 	}
 
 	private void checkEntities() {
+		// Fresh per-type population tally for the global breedable caps (only
+		// when the feature is on). Built here so the breed listener reads a
+		// cached count instead of scanning every entity per breeding event.
+		Map<String, Integer> typeCounts = breedableCapsEnabled ? new HashMap<>() : null;
+
 		for (World world : Bukkit.getWorlds()) {
 			int totalEntities = getNonPlayerEntities(world);
+
+			if (typeCounts != null) {
+				for (Entity entity : world.getEntities()) {
+					if (entity instanceof Player) continue;
+					String type = entity.getType().name().toLowerCase();
+					if (breedableLimits.containsKey(type)) {
+						typeCounts.merge(type, 1, Integer::sum);
+					}
+				}
+			}
 
 			// Decide whether to pause natural spawning based on the MOB count
 			// only -- not the total entity count. Dropped items, XP orbs,
@@ -108,6 +142,21 @@ public class EntityManager {
 				}
 			}
 		}
+
+		if (typeCounts != null) {
+			liveTypeCounts = typeCounts;
+		}
+	}
+
+	// True when the given (lowercase) entity type has a configured global cap
+	// and the loaded population is already at or above it. Used by the breeding
+	// listener to pause breeding without ever killing existing mobs. Reads the
+	// count cached by the last checkEntities pass, so it's O(1) per breed event.
+	public boolean isOverBreedableCap(String typeLowercase) {
+		if (!breedableCapsEnabled) return false;
+		Integer limit = breedableLimits.get(typeLowercase);
+		if (limit == null) return false;
+		return liveTypeCounts.getOrDefault(typeLowercase, 0) >= limit;
 	}
 
 	private void smartEntityRemoval() {

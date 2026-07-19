@@ -11,6 +11,7 @@ import com.comphenix.protocol.ProtocolManager;
 import tk.bridgersilk.lesslag.chunk.ChunkManager;
 import tk.bridgersilk.lesslag.entity.CommandControlListener;
 import tk.bridgersilk.lesslag.entity.EntityManager;
+import tk.bridgersilk.lesslag.entity.BreedingCapListener;
 import tk.bridgersilk.lesslag.entity.SpawnControlListener;
 import tk.bridgersilk.lesslag.item.ItemManagement;
 import tk.bridgersilk.lesslag.performance.PerformanceManager;
@@ -73,6 +74,11 @@ public class LessLag extends JavaPlugin {
 
 		Bukkit.getPluginManager().registerEvents(
 			new SpawnControlListener(entityManager),
+			this
+		);
+
+		Bukkit.getPluginManager().registerEvents(
+			new BreedingCapListener(entityManager),
 			this
 		);
 
@@ -158,6 +164,14 @@ public class LessLag extends JavaPlugin {
 
 	public Profiler getProfiler() {
 		return profiler;
+	}
+
+	public PerformanceManager getPerformanceManager() {
+		return performanceManager;
+	}
+
+	public EntityManager getEntityManager() {
+		return entityManager;
 	}
 
 	public ExplosionQueueManager getExplosionQueueManager() {
@@ -280,6 +294,11 @@ public class LessLag extends JavaPlugin {
 
 		Bukkit.getPluginManager().registerEvents(
 			new SpawnControlListener(entityManager),
+			this
+		);
+
+		Bukkit.getPluginManager().registerEvents(
+			new BreedingCapListener(entityManager),
 			this
 		);
 

@@ -74,7 +74,16 @@ public class VillagerOptimizer implements Listener {
 	private final int throttleRadius;
 	private final int throttlePeriodTicks;
 	private final int throttleOnTicks;
+	private final int throttleEfficiencyPercent;
 	private final int maxPerChunk;
+
+	// Snapshot of the last classify pass, for the /lesslag villagers readout.
+	// Written and read only on the main thread.
+	private int statTotal;
+	private int statNear;
+	private int statThrottled;
+	private int statCollisionOff;
+	private long statClassifyNanos;
 
 	// Whether the AI throttle actually does anything: it must be enabled AND
 	// leave villagers off for at least one tick per cycle (on < period). At
@@ -110,6 +119,7 @@ public class VillagerOptimizer implements Listener {
 		// never fully off (>= 1 tick per cycle: villagers always keep a pulse
 		// of AI, never a dead freeze) and never over 100%.
 		int pct = Math.max(1, Math.min(100, throttleEfficiencyPercent));
+		this.throttleEfficiencyPercent = pct;
 		int on = Math.round(this.throttlePeriodTicks * pct / 100.0f);
 		this.throttleOnTicks = Math.max(1, Math.min(this.throttlePeriodTicks, on));
 		this.throttleActive = throttleEnabled && throttleOnTicks < throttlePeriodTicks;
@@ -150,7 +160,11 @@ public class VillagerOptimizer implements Listener {
 	 * left throttled).
 	 */
 	private void classify() {
+		long start = System.nanoTime();
 		throttled.clear();
+
+		int total = 0;
+		int collisionOff = 0;
 
 		int chunkRadius = (throttleRadius + 15) / 16;
 
@@ -181,6 +195,9 @@ public class VillagerOptimizer implements Listener {
 				boolean playerNear = !throttleEnabled
 					|| nearPlayerChunks.contains(entry.getKey());
 
+				total += group.size();
+				if (crowded) collisionOff += group.size();
+
 				for (Villager villager : group) {
 					if (collisionThreshold > 0) {
 						boolean shouldCollide = !crowded;
@@ -201,7 +218,27 @@ public class VillagerOptimizer implements Listener {
 				}
 			}
 		}
+
+		statTotal = total;
+		statCollisionOff = collisionOff;
+		statThrottled = throttled.size();
+		statNear = total - statThrottled;
+		statClassifyNanos = System.nanoTime() - start;
 	}
+
+	/* ---- Debug readout for /lesslag villagers ---- */
+
+	public boolean isThrottleActive() { return throttleActive; }
+	public int getThrottleEfficiencyPercent() { return throttleEfficiencyPercent; }
+	public int getThrottleRadius() { return throttleRadius; }
+	public int getCheckIntervalTicks() { return checkIntervalTicks; }
+	public int getCollisionThreshold() { return collisionThreshold; }
+	public int getMaxPerChunk() { return maxPerChunk; }
+	public int getStatTotal() { return statTotal; }
+	public int getStatNear() { return statNear; }
+	public int getStatThrottled() { return statThrottled; }
+	public int getStatCollisionOff() { return statCollisionOff; }
+	public double getLastClassifyMillis() { return statClassifyNanos / 1_000_000.0; }
 
 	/**
 	 * Light pass (every tick): drive the awareness duty cycle over the cached

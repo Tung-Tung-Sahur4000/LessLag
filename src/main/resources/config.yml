@@ -74,10 +74,17 @@ item_management:
     show_in_hologram: true
     # Only show the ticking countdown in the FINAL N seconds before despawn.
     # Before that the hologram is static ("Dirt x64"); in the last N seconds
-    # the number appears and counts down ("Dirt x64 (10s)") as an
-    # about-to-expire warning. This avoids repainting every item's hologram
-    # every second. Set >= despawn_seconds to always show the countdown.
+    # the number appears and counts down as an about-to-expire warning. This
+    # avoids repainting every item's hologram every second. Set >=
+    # despawn_seconds to always show the countdown.
     countdown_seconds: 10
+    # How that final-seconds countdown is rendered, appended after the item
+    # name. Bold + RED by default (&c = red, &l = bold) so it clearly stands
+    # out from the item name instead of blending in -- e.g. "Dirt x64 [7s]"
+    # with the "[7s]" in bold red. Supports & colour codes; {seconds} is the
+    # live number. NOTE: Minecraft nametags have no font-size control, so BOLD
+    # is the largest/heaviest emphasis text can be given.
+    countdown_format: "&c&l[{seconds}s]"
     # Items that never expire (stay on the ground forever).
     whitelist:
       - diamond
@@ -140,6 +147,36 @@ entity_management:
   # safe, but killing can destroy farm mobs/drops. Turn on only if you
   # accept that trade-off.
   kill_excess_entities: false
+
+  breedable_global_limits:           # [OK] server-wide caps for FARM mobs only
+    # Global per-type population caps for breedable / farm mobs. Above a type's
+    # limit, further BREEDING and egg-hatching of THAT type is paused across the
+    # whole server until the population drops -- existing mobs are NEVER killed
+    # (pause-don't-wipe). Hostile mobs are never affected: they don't spawn from
+    # breeding/eggs, and only the types you list here are capped. Counts are of
+    # LOADED entities and refresh every ~10s, so a type may sit slightly over
+    # its cap between refreshes (harmless -- breeding cooldowns are slow).
+    enabled: true
+    limits:
+      villager: 500
+      cow: 100
+      sheep: 100
+      pig: 100
+      chicken: 100
+      rabbit: 100
+      mooshroom: 50
+      goat: 50
+      horse: 50
+      donkey: 50
+      llama: 50
+      fox: 50
+      cat: 50
+      wolf: 100
+      bee: 100
+      turtle: 50
+      frog: 50
+      # Add any breedable mob by its Bukkit type name (lowercase). Types not
+      # listed here are never capped.
 
   smart_entity_removal:              # [OFF] mass-deleted farms, disabled in code
     # The original logic deleted every entity of the most common type across
