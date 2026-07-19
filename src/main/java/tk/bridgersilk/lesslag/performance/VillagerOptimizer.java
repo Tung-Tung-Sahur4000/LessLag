@@ -1,10 +1,16 @@
 package tk.bridgersilk.lesslag.performance;
 
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Chunk;
+import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
@@ -106,26 +112,33 @@ public class VillagerOptimizer implements Listener {
 		int chunkRadius = (freezeAiRadius + 15) / 16;
 
 		for (World world : Bukkit.getWorlds()) {
+			// One entity pass per world, villagers only. Grouping by chunk here
+			// avoids calling getEntities() on every (mostly villager-free)
+			// loaded chunk -- on a big server that was thousands of snapshot
+			// allocations packed into a single tick every scan.
+			Collection<Villager> villagers = world.getEntitiesByClass(Villager.class);
+			if (villagers.isEmpty()) continue;
+
+			Map<Long, List<Villager>> byChunk = new HashMap<>();
+			for (Villager villager : villagers) {
+				Location loc = villager.getLocation();
+				long key = chunkKey(loc.getBlockX() >> 4, loc.getBlockZ() >> 4);
+				byChunk.computeIfAbsent(key, k -> new ArrayList<>()).add(villager);
+			}
+
 			Set<Long> nearPlayerChunks =
 				freezeAiEnabled ? buildNearPlayerChunks(world, chunkRadius) : null;
 
-			for (Chunk chunk : world.getLoadedChunks()) {
-				int villagerCount = 0;
-				for (Entity entity : chunk.getEntities()) {
-					if (entity instanceof Villager) villagerCount++;
-				}
-				if (villagerCount == 0) continue;
+			for (Map.Entry<Long, List<Villager>> entry : byChunk.entrySet()) {
+				List<Villager> group = entry.getValue();
 
 				boolean crowded =
-					collisionThreshold > 0 && villagerCount > collisionThreshold;
+					collisionThreshold > 0 && group.size() > collisionThreshold;
 
 				boolean playerNear = !freezeAiEnabled
-					|| nearPlayerChunks.contains(chunkKey(chunk.getX(), chunk.getZ()));
+					|| nearPlayerChunks.contains(entry.getKey());
 
-				for (Entity entity : chunk.getEntities()) {
-					if (!(entity instanceof Villager)) continue;
-					Villager villager = (Villager) entity;
-
+				for (Villager villager : group) {
 					if (collisionThreshold > 0) {
 						boolean shouldCollide = !crowded;
 						if (villager.isCollidable() != shouldCollide) {
