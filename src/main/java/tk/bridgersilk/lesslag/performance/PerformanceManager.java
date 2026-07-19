@@ -38,8 +38,10 @@ public class PerformanceManager {
 	private boolean villagerOptEnabled;
 	private int villagerCheckInterval;
 	private int villagerCollisionThreshold;
-	private boolean villagerFreezeAiEnabled;
-	private int villagerFreezeAiRadius;
+	private boolean villagerThrottleAiEnabled;
+	private int villagerThrottleAiRadius;
+	private int villagerThrottlePeriodTicks;
+	private int villagerThrottleEfficiencyPercent;
 	private int villagerMaxPerChunk;
 
 	private RedstoneListener redstoneListener;
@@ -150,12 +152,20 @@ public class PerformanceManager {
 			"villager_optimization.disable_collision_above_per_chunk", 6
 		);
 
-		villagerFreezeAiEnabled = config.getBoolean(
-			"villager_optimization.freeze_ai_when_no_players_nearby.enabled"
+		villagerThrottleAiEnabled = config.getBoolean(
+			"villager_optimization.throttle_ai_when_no_players_nearby.enabled"
 		);
 
-		villagerFreezeAiRadius = config.getInt(
-			"villager_optimization.freeze_ai_when_no_players_nearby.radius", 24
+		villagerThrottleAiRadius = config.getInt(
+			"villager_optimization.throttle_ai_when_no_players_nearby.radius", 24
+		);
+
+		villagerThrottlePeriodTicks = config.getInt(
+			"villager_optimization.throttle_ai_when_no_players_nearby.cycle_ticks", 20
+		);
+
+		villagerThrottleEfficiencyPercent = config.getInt(
+			"villager_optimization.throttle_ai_when_no_players_nearby.efficiency_percent", 30
 		);
 
 		villagerMaxPerChunk = config.getInt(
@@ -231,8 +241,10 @@ public class PerformanceManager {
 				plugin,
 				villagerCheckInterval,
 				villagerCollisionThreshold,
-				villagerFreezeAiEnabled,
-				villagerFreezeAiRadius,
+				villagerThrottleAiEnabled,
+				villagerThrottleAiRadius,
+				villagerThrottlePeriodTicks,
+				villagerThrottleEfficiencyPercent,
 				villagerMaxPerChunk
 			);
 		}

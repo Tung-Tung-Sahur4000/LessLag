@@ -246,16 +246,31 @@ villager_optimization:
   # Set to 0 to disable this lever (villagers keep vanilla collision).
   disable_collision_above_per_chunk: 6
 
-  # Freeze villager AI (pathfinding + the water/wall-jumping loop) when NO
-  # player is within this many blocks, and restore it the instant a player
-  # comes near. An in-use trading hall behaves normally; an idle breeder stops
-  # burning tick time while nobody is there.
-  # NOTE: this also pauses villager-driven farms (e.g. iron farms) while no
-  # player is within the radius. If you run AFK villager farms, either raise
-  # the radius past your AFK spot or set enabled: false.
-  freeze_ai_when_no_players_nearby:
+  # Villager AI (pathfinding + the water/wall-jumping loop) is the other big
+  # cost. Instead of HARD-FREEZING it when nobody's around -- which leaves
+  # villagers standing dead-still and looks like a broken/lagging server --
+  # this THROTTLES it: while no player is within `radius`, each villager's AI
+  # goals run only a fraction of ticks, so they still wander and turn (just
+  # sluggishly, like normal idling) while shedding most of the AI cost. The
+  # cycle is phase-staggered per villager, so a pen never freezes in unison --
+  # at any moment part of the herd is moving. Full-speed AI resumes when a
+  # player comes near.
+  # NOTE: this slows (does not stop) villager-driven farms (e.g. iron farms)
+  # while no player is within the radius. If you run AFK villager farms, raise
+  # the radius past your AFK spot, push efficiency_percent to 100, or disable.
+  throttle_ai_when_no_players_nearby:
     enabled: true
     radius: 24
+    # AI "efficiency" while no player is near, as a percentage (1-100). 30 =
+    # AI goals run ~30% as often (~70% of the AI cost saved) while villagers
+    # still visibly move. 100 = no throttling; lower = cheaper but more
+    # sluggish/noticeable. Never fully freezes: at least 1 tick of AI per
+    # cycle always runs.
+    efficiency_percent: 30
+    # Length of the on/off cycle in ticks (20 = 1s). The "on" window is
+    # efficiency_percent of this. Smaller = smoother movement, more toggles;
+    # larger = fewer toggles, choppier idling.
+    cycle_ticks: 20
 
   # Stop a breeder from growing without bound. Above this many villagers in a
   # chunk, new BREEDING is cancelled (trades, restock and existing villagers
