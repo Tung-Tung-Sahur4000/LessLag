@@ -223,6 +223,47 @@ mob_ai:
     invulnerable: true
 
 # ----------------------------------------------------------
+# Villager optimization  ->  [OK] targets packed breeders / trading halls
+# ----------------------------------------------------------
+# The classic "why is my server lagging" build: a pen with 10+ villagers all
+# colliding, all running AI, forever jumping against the water/walls. This
+# module has three INDEPENDENT levers -- each can be tuned or turned off on its
+# own. All periodic work runs on a timer (not per-tick, not per-mob), so its
+# cost does not grow with villager count, and state is only written when it
+# changes (no redundant packets).
+villager_optimization:
+  enabled: true
+  # How often (in ticks) the collision/AI scan runs. 20 ticks = 1 second.
+  # Clamped to a 20-tick minimum in code. Higher = cheaper, slightly less
+  # responsive when players walk up to a hall.
+  check_interval_ticks: 100
+
+  # Entity push/collision is the DOMINANT cost in a packed pen -- it grows with
+  # the square of the villager count (everyone shoves everyone). Once a chunk
+  # holds MORE than this many villagers, their collision is switched off: they
+  # still breed, trade and restock, they just stop pushing each other. This is
+  # the single biggest win and has essentially no downside for a breeder.
+  # Set to 0 to disable this lever (villagers keep vanilla collision).
+  disable_collision_above_per_chunk: 6
+
+  # Freeze villager AI (pathfinding + the water/wall-jumping loop) when NO
+  # player is within this many blocks, and restore it the instant a player
+  # comes near. An in-use trading hall behaves normally; an idle breeder stops
+  # burning tick time while nobody is there.
+  # NOTE: this also pauses villager-driven farms (e.g. iron farms) while no
+  # player is within the radius. If you run AFK villager farms, either raise
+  # the radius past your AFK spot or set enabled: false.
+  freeze_ai_when_no_players_nearby:
+    enabled: true
+    radius: 24
+
+  # Stop a breeder from growing without bound. Above this many villagers in a
+  # chunk, new BREEDING is cancelled (trades, restock and existing villagers
+  # are untouched -- villagers are NEVER killed, matching the plugin's
+  # pause-don't-wipe policy). Set to 0 to allow unlimited breeding.
+  max_per_chunk: 20
+
+# ----------------------------------------------------------
 # Chunk-loading throttle  ->  [OFF] disabled in code
 # ----------------------------------------------------------
 chunk_loading:

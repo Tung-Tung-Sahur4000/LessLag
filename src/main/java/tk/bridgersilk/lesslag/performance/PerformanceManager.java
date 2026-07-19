@@ -35,6 +35,13 @@ public class PerformanceManager {
 	private double tickSpeedThreshold;
 	private int decreaseTickSpeedTo;
 
+	private boolean villagerOptEnabled;
+	private int villagerCheckInterval;
+	private int villagerCollisionThreshold;
+	private boolean villagerFreezeAiEnabled;
+	private int villagerFreezeAiRadius;
+	private int villagerMaxPerChunk;
+
 	private RedstoneListener redstoneListener;
 	private FallingBlockListener fallingBlockListener;
 	private FluidListener fluidListener;
@@ -43,6 +50,7 @@ public class PerformanceManager {
 	private CommandBlockListener commandBlockListener;
 	private MobAIListener mobAIListener;
 	private TickSpeedListener tickSpeedListener;
+	private VillagerOptimizer villagerOptimizer;
 
 	private BukkitTask aiCheckTask;
 
@@ -129,6 +137,30 @@ public class PerformanceManager {
 		tickSpeedThreshold = config.getDouble(
 			"performance_controls.decrease_tickspeed.decrease_below_tps"
 		);
+
+		villagerOptEnabled = config.getBoolean(
+			"villager_optimization.enabled"
+		);
+
+		villagerCheckInterval = config.getInt(
+			"villager_optimization.check_interval_ticks", 100
+		);
+
+		villagerCollisionThreshold = config.getInt(
+			"villager_optimization.disable_collision_above_per_chunk", 6
+		);
+
+		villagerFreezeAiEnabled = config.getBoolean(
+			"villager_optimization.freeze_ai_when_no_players_nearby.enabled"
+		);
+
+		villagerFreezeAiRadius = config.getInt(
+			"villager_optimization.freeze_ai_when_no_players_nearby.radius", 24
+		);
+
+		villagerMaxPerChunk = config.getInt(
+			"villager_optimization.max_per_chunk", 20
+		);
 	}
 
 	private void registerListeners() {
@@ -193,6 +225,17 @@ public class PerformanceManager {
 				tickSpeedThreshold
 			);
 		}
+
+		if (villagerOptEnabled) {
+			villagerOptimizer = new VillagerOptimizer(
+				plugin,
+				villagerCheckInterval,
+				villagerCollisionThreshold,
+				villagerFreezeAiEnabled,
+				villagerFreezeAiRadius,
+				villagerMaxPerChunk
+			);
+		}
 	}
 
 	public void disable() {
@@ -229,6 +272,11 @@ public class PerformanceManager {
 		if (mobAIListener != null) {
 			mobAIListener.unregister();
 			mobAIListener = null;
+		}
+
+		if (villagerOptimizer != null) {
+			villagerOptimizer.unregister();
+			villagerOptimizer = null;
 		}
 
 		if (aiCheckTask != null) {
