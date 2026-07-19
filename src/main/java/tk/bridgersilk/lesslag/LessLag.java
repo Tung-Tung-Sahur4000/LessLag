@@ -265,6 +265,17 @@ public class LessLag extends JavaPlugin {
 		configManager.reloadConfig();
 
 		/*
+		 * Clear every listener this plugin registered before rebuilding.
+		 * Several listeners (PlayerJoin/PlayerTeleport/Chat/SpawnControl/
+		 * CommandControl/BreedingCap) are registered as inline instances with
+		 * no field reference, so nothing else can unregister them -- without
+		 * this, each reload would stack a fresh copy on top of the old ones and
+		 * fire their handlers twice (then three times, ...). Managers recreated
+		 * below re-register their own listeners fresh.
+		 */
+		HandlerList.unregisterAll(this);
+
+		/*
 		 * Recreate all managers using the new configuration.
 		 */
 		profiler = new Profiler(this);

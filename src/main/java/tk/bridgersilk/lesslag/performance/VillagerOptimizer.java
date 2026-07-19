@@ -310,13 +310,22 @@ public class VillagerOptimizer implements Listener {
 			task.cancel();
 			task = null;
 		}
-		// Leave no villager stuck mid-throttle after a disable/reload: restore
-		// full AI awareness on anything we were cycling.
-		for (Villager villager : throttled) {
-			if (villager.isValid()) {
-				setAware(villager, true);
+		throttled.clear();
+
+		// Restore vanilla state on disable/reload so the feature is fully
+		// reversible -- never leave a villager stuck non-collidable or
+		// mid-throttle (unaware). One pass over loaded villagers; disable/reload
+		// is rare, and if the feature is just reloading the new instance
+		// re-applies within one scan.
+		for (World world : Bukkit.getWorlds()) {
+			for (Villager villager : world.getEntitiesByClass(Villager.class)) {
+				if (collisionThreshold > 0 && !villager.isCollidable()) {
+					villager.setCollidable(true);
+				}
+				if (throttleEnabled && !villager.isAware()) {
+					villager.setAware(true);
+				}
 			}
 		}
-		throttled.clear();
 	}
 }
