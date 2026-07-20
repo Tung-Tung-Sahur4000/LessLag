@@ -31,9 +31,14 @@ public class ChunkManager implements Listener {
     public ChunkManager(Plugin plugin) {
         this.plugin = plugin;
         this.config = plugin.getConfig();
-        Bukkit.getPluginManager().registerEvents(this, plugin);
         loadConfigValues();
-        startChunkCounterResetTask();
+
+        // chunk_loading throttle is DISABLED at the plugin level: it
+        // force-unloaded chunks the server was actively loading, which
+        // fights the engine and causes churn/visual glitches rather than
+        // helping. The listener and counter task are intentionally not
+        // registered. (disable() below is a safe no-op in this state.)
+        throttlingEnabled = false;
     }
 
     private void loadConfigValues() {

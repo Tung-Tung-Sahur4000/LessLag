@@ -1,0 +1,46 @@
+name: Build Plugin
+
+# Builds the LessLag plugin jar and publishes it as a downloadable
+# workflow artifact. Runs on every push and PR, and can be triggered
+# manually from the Actions tab (Run workflow).
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        # Paper 1.21.x is compiled for Java 21 (class-file major version 65),
+        # so the build JDK must be 21+ or javac can't read the Paper API and
+        # every org.bukkit.* type fails with "cannot find symbol".
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Build with Maven
+        run: mvn -B -ntp clean package
+
+      - name: Upload plugin jar
+        uses: actions/upload-artifact@v4
+        with:
+          # Downloadable from the run's "Artifacts" section.
+          name: LessLag-plugin
+          # The shaded plugin jar only — exclude the pre-shade "original-" jar.
+          path: |
+            target/lesslag-*.jar
+            !target/original-lesslag-*.jar
+          if-no-files-found: error
+          retention-days: 30

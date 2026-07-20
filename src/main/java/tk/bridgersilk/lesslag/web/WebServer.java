@@ -42,8 +42,25 @@ public class WebServer {
 		this.plugin = plugin;
 	}
 
+	/*
+	 * The web interface is unfinished in this build: the profiler /
+	 * history / reports pages are static placeholders and there is no
+	 * SSL support. It is DISABLED at the plugin level so it never opens a
+	 * listening socket. Set this to true again once the pages actually
+	 * render live data.
+	 */
+	private static final boolean WEB_INTERFACE_IMPLEMENTED = false;
+
 	public synchronized void start() {
 		if (server != null) {
+			return;
+		}
+
+		if (!WEB_INTERFACE_IMPLEMENTED) {
+			plugin.getLogger().info(
+				"Web interface is disabled in this build "
+					+ "(pages are not implemented yet)."
+			);
 			return;
 		}
 

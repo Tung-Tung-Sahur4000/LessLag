@@ -8,14 +8,23 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.bukkit.Bukkit;
 import org.bukkit.World;
 import org.bukkit.entity.Player;
+import org.bukkit.scheduler.BukkitTask;
 
 import tk.bridgersilk.lesslag.LessLag;
+import tk.bridgersilk.lesslag.performance.TPSUtil;
 
 public class WorldManager {
 
 	private final LessLag plugin;
 
 	private final Map<String, Long> worldActivity = new ConcurrentHashMap<>();
+
+	// Handles for the tasks this manager owns, so disable() cancels only
+	// these and not every task belonging to the plugin (which used to break
+	// unrelated features on /ll reload).
+	private BukkitTask activityTask;
+	private BukkitTask autoUnloadTask;
+	private BukkitTask lowTpsUnloadTask;
 
 	public WorldManager(LessLag plugin) {
 		this.plugin = plugin;
@@ -30,7 +39,7 @@ public class WorldManager {
 	}
 
 	private void startActivityTracker() {
-		Bukkit.getScheduler().runTaskTimer(plugin, () -> {
+		activityTask = Bukkit.getScheduler().runTaskTimer(plugin, () -> {
 			for (World world : Bukkit.getWorlds()) {
 				if (!world.getPlayers().isEmpty()) {
 					worldActivity.put(world.getName(), System.currentTimeMillis());
@@ -44,7 +53,7 @@ public class WorldManager {
 
 		long checkInterval = plugin.getConfig().getLong("settings.tps_check_interval", 20L);
 
-		Bukkit.getScheduler().runTaskTimer(plugin, () -> {
+		autoUnloadTask = Bukkit.getScheduler().runTaskTimer(plugin, () -> {
 			int inactivityMinutes = plugin.getConfig().getInt("world_management.auto_unload.inactivity_minutes", 5);
 			long inactivityThreshold = inactivityMinutes * 60_000L;
 
@@ -67,9 +76,12 @@ public class WorldManager {
 		long checkInterval = plugin.getConfig().getLong("settings.tps_check_interval", 20L);
         String prefix = plugin.getConfig().getString("settings.prefix");
 
-		Bukkit.getScheduler().runTaskTimer(plugin, () -> {
+		lowTpsUnloadTask = Bukkit.getScheduler().runTaskTimer(plugin, () -> {
 			double criticalTps = plugin.getConfig().getDouble("settings.critical_tps_threshold", 10.0);
-			double currentTps = Bukkit.getServer().getTPS()[0];
+			// Deliberately the SUSTAINED 1-minute average, not the spike
+			// signal: unloading worlds and teleporting every player is
+			// drastic and must not fire on a momentary tick spike.
+			double currentTps = TPSUtil.getAverageTPS();
 
 			if (currentTps < criticalTps) {
 				String transferWorldName = plugin.getConfig().getString("world_management.force_unload_on_low_tps.player_transfer_world", "world");
@@ -140,7 +152,21 @@ public class WorldManager {
 	}
 
 	public void disable() {
-		Bukkit.getScheduler().cancelTasks(plugin);
+		// Cancel only the tasks this manager started. The old
+		// cancelTasks(plugin) call tore down EVERY LessLag task, killing
+		// unrelated features (item stacking, profiler, etc.) on /ll reload.
+		cancelTask(activityTask);
+		cancelTask(autoUnloadTask);
+		cancelTask(lowTpsUnloadTask);
+		activityTask = null;
+		autoUnloadTask = null;
+		lowTpsUnloadTask = null;
 		worldActivity.clear();
+	}
+
+	private void cancelTask(BukkitTask task) {
+		if (task != null) {
+			task.cancel();
+		}
 	}
 }
