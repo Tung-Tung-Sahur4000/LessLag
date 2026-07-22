@@ -131,11 +131,17 @@ item_management:
     #   {amount}    = total amount in the stack
     # The drop_timer countdown (if enabled) is appended automatically.
     hologram_format: "§e{item_name}§f x{amount}"
-    # "partial" = pick up only what fits; "full" = take the whole stack only if
-    # it ALL fits. In "full" mode, a full inventory that still has room in an
-    # existing partial stack of the same item will top that off (like vanilla)
-    # rather than rejecting the pickup outright.
-    pickup_behavior: "partial"
+    # Picking up a stacked ground item takes only what fits: it tops off
+    # existing stacks of the SAME item, then fills empty slots, and leaves any
+    # genuine overflow on the ground (with its hologram count decremented). A
+    # different item that has no room is left untouched, so walking over a mixed
+    # pile grabs what your inventory can hold and skips the rest.
+    # Diagnostic logging. When true, every stacked-item pickup prints one line
+    # to the server console: the item, the amount tracked on the stack, how much
+    # was actually picked up, and how much was left on the ground. Use it to see
+    # exactly what a pickup did (e.g. "pickedUp=0 leftOnGround=13" means the
+    # inventory genuinely had no room for that item). Leave off in production.
+    debug: false
 
   water_stacking:                    # [OK] collapse bubble-column / water items
     # Items caught in a bubble column (soul sand pushes them up, magma pulls
