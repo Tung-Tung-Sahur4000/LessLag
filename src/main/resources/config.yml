@@ -131,7 +131,10 @@ item_management:
     #   {amount}    = total amount in the stack
     # The drop_timer countdown (if enabled) is appended automatically.
     hologram_format: "§e{item_name}§f x{amount}"
-    # "partial" = pick up only what fits; "full" = all-or-nothing.
+    # "partial" = pick up only what fits; "full" = take the whole stack only if
+    # it ALL fits. In "full" mode, a full inventory that still has room in an
+    # existing partial stack of the same item will top that off (like vanilla)
+    # rather than rejecting the pickup outright.
     pickup_behavior: "partial"
 
   water_stacking:                    # [OK] collapse bubble-column / water items
