@@ -1,10 +1,6 @@
 package tk.bridgersilk.lesslag.entity;
 
-import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Chunk;
@@ -21,14 +17,11 @@ public class EntityManager {
 
 	private final Plugin plugin;
 	private BukkitTask chunkAndWorldCheckTask;
-	private BukkitTask smartRemovalTask;
 
 	private int maxEntitiesPerChunk;
 	private int maxEntitiesPerWorld;
 	private boolean disableNaturalSpawnOnLimit;
 	private boolean killExcessEntities;
-	private boolean smartRemovalEnabled;
-	private List<String> smartRemovalWhitelist;
 
 	public EntityManager(Plugin plugin) {
 		this.plugin = plugin;
@@ -41,25 +34,18 @@ public class EntityManager {
 		this.maxEntitiesPerChunk = config.getInt("entity_management.max_entities_per_chunk", 50);
 		this.maxEntitiesPerWorld = config.getInt("entity_management.max_entities_per_world", 5000);
 		this.disableNaturalSpawnOnLimit = config.getBoolean("entity_management.disable_natural_spawn_on_limit", true);
-		this.killExcessEntities = config.getBoolean("entity_management.kill_excess_entities", true);
-
-		this.smartRemovalEnabled = config.getBoolean("entity_management.smart_entity_removal.enabled", true);
-		this.smartRemovalWhitelist = config.getStringList("entity_management.smart_entity_removal.whitelist").stream().map(String::toUpperCase).toList();
+		// Default OFF to match the shipped config and docs. The code default
+		// used to be true, so a config missing this key (an older config, or a
+		// hand-trimmed one) would silently enable the farm-killing hard cap.
+		this.killExcessEntities = config.getBoolean("entity_management.kill_excess_entities", false);
 	}
 
 	private void startTasks() {
 		chunkAndWorldCheckTask = Bukkit.getScheduler().runTaskTimer(plugin, this::checkEntities, 0L, 200L);
-
-		// smart_entity_removal is DISABLED at the plugin level. Its logic
-		// deleted every entity of the most common type across all worlds
-		// every 5 minutes with no TPS or overpopulation check, which wipes
-		// farms even at full TPS. The safe world/chunk soft-caps above
-		// (checkEntities) remain active. See smartEntityRemoval() below.
 	}
 
 	public void stopTasks() {
 		if (chunkAndWorldCheckTask != null) chunkAndWorldCheckTask.cancel();
-		if (smartRemovalTask != null) smartRemovalTask.cancel();
 	}
 
 	public void reload() {
@@ -106,52 +92,6 @@ public class EntityManager {
 						killExcessEntitiesInChunk(chunk, entityCount - maxEntitiesPerChunk);
 					}
 				}
-			}
-		}
-	}
-
-	private void smartEntityRemoval() {
-		// Hard-disabled at the plugin level regardless of config: the
-		// original behavior mass-deleted entities unconditionally and was
-		// destructive to farms. Left in place (unscheduled) for reference.
-		if (true) return;
-
-		if (!smartRemovalEnabled) return;
-
-		Map<String, AtomicInteger> entityCountMap = new HashMap<>();
-
-        String prefix = plugin.getConfig().getString("settings.prefix");
-
-		for (World world : Bukkit.getWorlds()) {
-			for (Entity entity : world.getEntities()) {
-				if (entity instanceof Player) continue;
-				String type = entity.getType().name();
-				if (smartRemovalWhitelist.contains(type)) continue;
-
-				entityCountMap.computeIfAbsent(type, k -> new AtomicInteger()).incrementAndGet();
-			}
-		}
-
-		String mostFrequent = entityCountMap.entrySet().stream()
-				.max(Comparator.comparingInt(e -> e.getValue().get()))
-				.map(Map.Entry::getKey)
-				.orElse(null);
-
-		if (mostFrequent != null) {
-            int removed = 0;
-			for (World world : Bukkit.getWorlds()) {
-				for (Entity entity : world.getEntitiesByClass(Entity.class)) {
-					if (entity.getType().name().equals(mostFrequent) &&
-                    !(entity instanceof Player) &&
-                    !smartRemovalWhitelist.contains(entity.getType().name().toUpperCase())) {
-						entity.remove();
-                        removed++;
-					}
-				}
-			}
-			Bukkit.getLogger().info(prefix + "Smart entity removal executed: Removed all " + mostFrequent + " entities.");
-            if (removed > 0) {
-				notifyAdmins("§eSmart removal: §cRemoved §b" + removed + " §centities of type §b" + mostFrequent + " §cacross all worlds.");
 			}
 		}
 	}

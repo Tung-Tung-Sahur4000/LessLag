@@ -45,7 +45,7 @@ public class MainCommand
 			sender.sendMessage(
 				prefix
 					+ "§eUse /lesslag "
-					+ "<reload|info|profiler|worlds|web>"
+					+ "<reload|info|profiler|worlds>"
 			);
 
 			return true;
@@ -82,127 +82,15 @@ public class MainCommand
 				worldInfo.sendWorldInfo(sender);
 				break;
 
-			case "web":
-				handleWebCommand(sender, args, prefix);
-				break;
-
 			default:
 				sender.sendMessage(
 					prefix
 						+ "§cUnknown subcommand. Use /lesslag "
-						+ "<reload|info|profiler|worlds|web>"
+						+ "<reload|info|profiler|worlds>"
 				);
 		}
 
 		return true;
-	}
-
-	private void handleWebCommand(
-		CommandSender sender,
-		String[] args,
-		String prefix
-	) {
-		if (!sender.hasPermission("lesslag.admin")) {
-			sender.sendMessage(
-				prefix
-					+ "§cYou do not have permission to "
-					+ "use the web interface."
-			);
-
-			return;
-		}
-
-		if (args.length < 2) {
-			sender.sendMessage(
-				prefix
-					+ "§cUsage: /lesslag web "
-					+ "<profiler|history|reports>"
-			);
-
-			return;
-		}
-
-		String page = args[1].toLowerCase();
-
-		if (
-			!page.equals("profiler")
-				&& !page.equals("history")
-				&& !page.equals("reports")
-		) {
-			sender.sendMessage(
-				prefix
-					+ "§cUnknown web page. Use "
-					+ "<profiler|history|reports>."
-			);
-
-			return;
-		}
-
-		FileConfiguration config =
-			plugin.getConfigManager().getConfig();
-
-		if (
-			!config.getBoolean(
-				"web_interface.enabled",
-				true
-			)
-		) {
-			sender.sendMessage(
-				prefix
-					+ "§cThe web interface is disabled "
-					+ "in config.yml."
-			);
-
-			return;
-		}
-
-		if (
-			plugin.getWebServer() == null
-				|| !plugin.getWebServer().isRunning()
-		) {
-			sender.sendMessage(
-				prefix
-					+ "§cThe web interface is not running. "
-					+ "Check the server console for errors."
-			);
-
-			return;
-		}
-
-		String link =
-			plugin.getWebServer().generateAccessLink(page);
-
-		if (link == null) {
-			sender.sendMessage(
-				prefix
-					+ "§cCould not generate the web link."
-			);
-
-			return;
-		}
-
-		boolean generatedAccessLink = config.getBoolean(
-			"web_interface.generate_access_links",
-			true
-		);
-
-		if (generatedAccessLink) {
-			sender.sendMessage(
-				prefix
-					+ "§aYour temporary "
-					+ page
-					+ " access link:"
-			);
-		} else {
-			sender.sendMessage(
-				prefix
-					+ "§a"
-					+ capitalize(page)
-					+ " web interface:"
-			);
-		}
-
-		sender.sendMessage("§b§n" + link);
 	}
 
 	@Override
@@ -218,25 +106,9 @@ public class MainCommand
 					"reload",
 					"info",
 					"profiler",
-					"worlds",
-					"web"
+					"worlds"
 				),
 				args[0]
-			);
-		}
-
-		if (
-			args.length == 2
-				&& args[0].equalsIgnoreCase("web")
-				&& sender.hasPermission("lesslag.admin")
-		) {
-			return filterCompletions(
-				Arrays.asList(
-					"profiler",
-					"history",
-					"reports"
-				),
-				args[1]
 			);
 		}
 
@@ -256,14 +128,5 @@ public class MainCommand
 					.startsWith(lowerInput)
 			)
 			.toList();
-	}
-
-	private String capitalize(String value) {
-		if (value == null || value.isBlank()) {
-			return value;
-		}
-
-		return Character.toUpperCase(value.charAt(0))
-			+ value.substring(1);
 	}
 }

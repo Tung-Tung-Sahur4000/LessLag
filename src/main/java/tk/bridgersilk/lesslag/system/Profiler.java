@@ -32,6 +32,8 @@ public class Profiler {
     private long totalOutgoingPackets = 0;
 
     private BukkitTask updateTask;
+    private PacketAdapter incomingAdapter;
+    private PacketAdapter outgoingAdapter;
 
     private boolean blinkToggle = false;
     private final boolean enabled;
@@ -121,19 +123,22 @@ public class Profiler {
 
         ProtocolManager manager = ProtocolLibrary.getProtocolManager();
 
-        manager.addPacketListener(new PacketAdapter(plugin, getClientPackets()) {
+        incomingAdapter = new PacketAdapter(plugin, getClientPackets()) {
             @Override
             public void onPacketReceiving(PacketEvent event) {
                 totalIncomingPackets++;
             }
-        });
+        };
 
-        manager.addPacketListener(new PacketAdapter(plugin, getServerPackets()) {
+        outgoingAdapter = new PacketAdapter(plugin, getServerPackets()) {
             @Override
             public void onPacketSending(PacketEvent event) {
                 totalOutgoingPackets++;
             }
-        });
+        };
+
+        manager.addPacketListener(incomingAdapter);
+        manager.addPacketListener(outgoingAdapter);
     }
 
     private void startUpdating() {
@@ -238,9 +243,19 @@ public class Profiler {
             updateTask = null;
         }
 
-        ProtocolLibrary.getProtocolManager().getPacketListeners().stream()
-            .filter(listener -> listener.getPlugin().equals(plugin))
-            .forEach(ProtocolLibrary.getProtocolManager()::removePacketListener);
+        // Remove ONLY the profiler's own packet listeners. The old code
+        // removed every ProtocolLib listener the plugin had registered, which
+        // also tore down PlayerManager's packet-spam protection -- only safe
+        // because reload happened to recreate PlayerManager afterwards.
+        ProtocolManager manager = ProtocolLibrary.getProtocolManager();
+        if (incomingAdapter != null) {
+            manager.removePacketListener(incomingAdapter);
+            incomingAdapter = null;
+        }
+        if (outgoingAdapter != null) {
+            manager.removePacketListener(outgoingAdapter);
+            outgoingAdapter = null;
+        }
 
         totalIncomingPackets = 0;
         totalOutgoingPackets = 0;

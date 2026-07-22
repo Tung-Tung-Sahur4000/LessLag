@@ -1,7 +1,6 @@
 package tk.bridgersilk.lesslag.performance;
 
 import org.bukkit.configuration.file.FileConfiguration;
-import org.bukkit.scheduler.BukkitTask;
 
 import tk.bridgersilk.lesslag.LessLag;
 
@@ -28,9 +27,6 @@ public class PerformanceManager {
 	private boolean commandBlocksEnabled;
 	private double commandBlocksTpsThreshold;
 
-	private boolean mobAiDisableWhenNoPlayers;
-	private int mobAiRadius;
-
 	private boolean decreaseTickSpeed;
 	private double tickSpeedThreshold;
 	private int decreaseTickSpeedTo;
@@ -41,10 +37,7 @@ public class PerformanceManager {
 	private ExplosionListener explosionListener;
 	private EnderPearlListener enderPearlListener;
 	private CommandBlockListener commandBlockListener;
-	private MobAIListener mobAIListener;
 	private TickSpeedListener tickSpeedListener;
-
-	private BukkitTask aiCheckTask;
 
 	public PerformanceManager(LessLag plugin) {
 		this.plugin = plugin;
@@ -110,14 +103,6 @@ public class PerformanceManager {
 			"performance_controls.disable_command_blocks.disable_below_tps"
 		);
 
-		mobAiDisableWhenNoPlayers = config.getBoolean(
-			"mob_ai.disable_ai_when_no_players_nearby.enabled"
-		);
-
-		mobAiRadius = config.getInt(
-			"mob_ai.disable_ai_when_no_players_nearby.radius"
-		);
-
 		decreaseTickSpeed = config.getBoolean(
 			"performance_controls.decrease_tickspeed.enabled"
 		);
@@ -175,17 +160,6 @@ public class PerformanceManager {
 			);
 		}
 
-		// mob_ai (disable_ai_when_no_players_nearby) is DISABLED at the
-		// plugin level: its invulnerability logic was inverted and its
-		// per-mob proximity scan added more tick cost than it saved.
-		// Intentionally not registered regardless of config.
-		if (false && mobAiDisableWhenNoPlayers) {
-			mobAIListener = new MobAIListener(
-				plugin,
-				mobAiRadius
-			);
-		}
-
 		if (decreaseTickSpeed) {
 			tickSpeedListener = new TickSpeedListener(
 				plugin,
@@ -226,14 +200,12 @@ public class PerformanceManager {
 			commandBlockListener = null;
 		}
 
-		if (mobAIListener != null) {
-			mobAIListener.unregister();
-			mobAIListener = null;
-		}
-
-		if (aiCheckTask != null) {
-			aiCheckTask.cancel();
-			aiCheckTask = null;
+		// Cancels the tick-speed task AND restores any random-tick-speed it
+		// lowered. Previously this listener was never stopped, so /lesslag
+		// reload leaked its task and could leave RANDOM_TICK_SPEED stuck low.
+		if (tickSpeedListener != null) {
+			tickSpeedListener.unregister();
+			tickSpeedListener = null;
 		}
 	}
 }

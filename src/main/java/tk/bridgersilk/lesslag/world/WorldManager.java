@@ -107,30 +107,36 @@ public class WorldManager {
 	}
 
 	private void unloadWorld(World world, String reason) {
+		// Capture the cheap main-thread stats (and the folder path) before the
+		// unload; the folder-size walk below is deferred off-thread.
+		String name = world.getName();
 		int entities = world.getEntities().size();
 		int chunks = world.getLoadedChunks().length;
 		int players = world.getPlayers().size();
-		double sizeMb = getWorldSizeInMb(world);
+		File folder = world.getWorldFolder();
 
         String prefix = plugin.getConfig().getString("settings.prefix");
-
-		String message = String.format("§b%s §7| Entities: §f%d §7| Chunks: §f%d §7| Players: §f%d §7| Size: §f%.2f MB",
-				world.getName(), entities, chunks, players, sizeMb);
-
         boolean saveWorld = plugin.getConfig().getBoolean("world_management.auto_unload.save_world");
-		boolean success = Bukkit.unloadWorld(world, saveWorld);
-		if (success) {
-			for (Player admin : Bukkit.getOnlinePlayers()) {
-				if (admin.hasPermission("lesslag.admin")) {
-					admin.sendMessage(prefix + "§eUnloaded world: " + message + " §7(Reason: " + reason + ")");
-				}
-			}
-		}
-	}
 
-	private double getWorldSizeInMb(World world) {
-		File folder = world.getWorldFolder();
-		return bytesToMb(getFolderSize(folder));
+		boolean success = Bukkit.unloadWorld(world, saveWorld);
+		if (!success) return;
+
+		// The recursive folder-size walk is disk I/O (potentially GBs of region
+		// files); running it on the main thread stalled the server during an
+		// unload. Do it async, then notify admins back on the main thread.
+		Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+			double sizeMb = bytesToMb(getFolderSize(folder));
+			String message = String.format("§b%s §7| Entities: §f%d §7| Chunks: §f%d §7| Players: §f%d §7| Size: §f%.2f MB",
+					name, entities, chunks, players, sizeMb);
+
+			Bukkit.getScheduler().runTask(plugin, () -> {
+				for (Player admin : Bukkit.getOnlinePlayers()) {
+					if (admin.hasPermission("lesslag.admin")) {
+						admin.sendMessage(prefix + "§eUnloaded world: " + message + " §7(Reason: " + reason + ")");
+					}
+				}
+			});
+		});
 	}
 
 	private long getFolderSize(File folder) {
