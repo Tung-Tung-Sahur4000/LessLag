@@ -11,6 +11,7 @@ import com.comphenix.protocol.ProtocolManager;
 import tk.bridgersilk.lesslag.chunk.ChunkManager;
 import tk.bridgersilk.lesslag.entity.CommandControlListener;
 import tk.bridgersilk.lesslag.entity.EntityManager;
+import tk.bridgersilk.lesslag.entity.BreedingCapListener;
 import tk.bridgersilk.lesslag.entity.SpawnControlListener;
 import tk.bridgersilk.lesslag.item.ItemManagement;
 import tk.bridgersilk.lesslag.performance.PerformanceManager;
@@ -73,6 +74,11 @@ public class LessLag extends JavaPlugin {
 
 		Bukkit.getPluginManager().registerEvents(
 			new SpawnControlListener(entityManager),
+			this
+		);
+
+		Bukkit.getPluginManager().registerEvents(
+			new BreedingCapListener(entityManager),
 			this
 		);
 
@@ -158,6 +164,14 @@ public class LessLag extends JavaPlugin {
 
 	public Profiler getProfiler() {
 		return profiler;
+	}
+
+	public PerformanceManager getPerformanceManager() {
+		return performanceManager;
+	}
+
+	public EntityManager getEntityManager() {
+		return entityManager;
 	}
 
 	public ExplosionQueueManager getExplosionQueueManager() {
@@ -251,6 +265,17 @@ public class LessLag extends JavaPlugin {
 		configManager.reloadConfig();
 
 		/*
+		 * Clear every listener this plugin registered before rebuilding.
+		 * Several listeners (PlayerJoin/PlayerTeleport/Chat/SpawnControl/
+		 * CommandControl/BreedingCap) are registered as inline instances with
+		 * no field reference, so nothing else can unregister them -- without
+		 * this, each reload would stack a fresh copy on top of the old ones and
+		 * fire their handlers twice (then three times, ...). Managers recreated
+		 * below re-register their own listeners fresh.
+		 */
+		HandlerList.unregisterAll(this);
+
+		/*
 		 * Recreate all managers using the new configuration.
 		 */
 		profiler = new Profiler(this);
@@ -280,6 +305,11 @@ public class LessLag extends JavaPlugin {
 
 		Bukkit.getPluginManager().registerEvents(
 			new SpawnControlListener(entityManager),
+			this
+		);
+
+		Bukkit.getPluginManager().registerEvents(
+			new BreedingCapListener(entityManager),
 			this
 		);
 

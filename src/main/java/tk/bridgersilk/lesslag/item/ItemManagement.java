@@ -54,6 +54,7 @@ public class ItemManagement implements Listener {
 	private int despawnTicks;
 	private boolean showTimerInHologram;
 	private int countdownSeconds;
+	private String countdownFormat;
 	private Set<Material> dropTimerWhitelist;
 
 	// Hologram throttling for drop-heavy situations (mining, farms).
@@ -94,6 +95,10 @@ public class ItemManagement implements Listener {
 		despawnTicks = Math.max(1, config.getInt("item_management.drop_timer.despawn_seconds", 30)) * 20;
 		showTimerInHologram = config.getBoolean("item_management.drop_timer.show_in_hologram", true);
 		countdownSeconds = Math.max(0, config.getInt("item_management.drop_timer.countdown_seconds", 10));
+		// Bold + red by default so the final-seconds countdown stands out from
+		// the item name instead of blending in. {seconds} = live number.
+		countdownFormat = ChatColor.translateAlternateColorCodes('&',
+				config.getString("item_management.drop_timer.countdown_format", "&c&l[{seconds}s]"));
 		dropTimerWhitelist = parseMaterials(config.getStringList("item_management.drop_timer.whitelist"));
 
 		hologramEnabled = config.getBoolean("item_management.hologram.enabled", true);
@@ -442,7 +447,10 @@ public class ItemManagement implements Listener {
 				&& !dropTimerWhitelist.contains(item.getItemStack().getType())) {
 			int secs = secondsLeft(item);
 			if (secs <= countdownSeconds) {
-				displayName += " " + ChatColor.GRAY + "(" + secs + "s)";
+				// Reset any trailing colour from the item name so the bold-red
+				// countdown always renders in its own configured style.
+				displayName += " " + ChatColor.RESET
+						+ countdownFormat.replace("{seconds}", String.valueOf(secs));
 			}
 		}
 

@@ -74,10 +74,17 @@ item_management:
     show_in_hologram: true
     # Only show the ticking countdown in the FINAL N seconds before despawn.
     # Before that the hologram is static ("Dirt x64"); in the last N seconds
-    # the number appears and counts down ("Dirt x64 (10s)") as an
-    # about-to-expire warning. This avoids repainting every item's hologram
-    # every second. Set >= despawn_seconds to always show the countdown.
+    # the number appears and counts down as an about-to-expire warning. This
+    # avoids repainting every item's hologram every second. Set >=
+    # despawn_seconds to always show the countdown.
     countdown_seconds: 10
+    # How that final-seconds countdown is rendered, appended after the item
+    # name. Bold + RED by default (&c = red, &l = bold) so it clearly stands
+    # out from the item name instead of blending in -- e.g. "Dirt x64 [7s]"
+    # with the "[7s]" in bold red. Supports & colour codes; {seconds} is the
+    # live number. NOTE: Minecraft nametags have no font-size control, so BOLD
+    # is the largest/heaviest emphasis text can be given.
+    countdown_format: "&c&l[{seconds}s]"
     # Items that never expire (stay on the ground forever).
     whitelist:
       - diamond
@@ -140,6 +147,36 @@ entity_management:
   # safe, but killing can destroy farm mobs/drops. Turn on only if you
   # accept that trade-off.
   kill_excess_entities: false
+
+  breedable_global_limits:           # [OK] server-wide caps for FARM mobs only
+    # Global per-type population caps for breedable / farm mobs. Above a type's
+    # limit, further BREEDING and egg-hatching of THAT type is paused across the
+    # whole server until the population drops -- existing mobs are NEVER killed
+    # (pause-don't-wipe). Hostile mobs are never affected: they don't spawn from
+    # breeding/eggs, and only the types you list here are capped. Counts are of
+    # LOADED entities and refresh every ~10s, so a type may sit slightly over
+    # its cap between refreshes (harmless -- breeding cooldowns are slow).
+    enabled: true
+    limits:
+      villager: 500
+      cow: 100
+      sheep: 100
+      pig: 100
+      chicken: 100
+      rabbit: 100
+      mooshroom: 50
+      goat: 50
+      horse: 50
+      donkey: 50
+      llama: 50
+      fox: 50
+      cat: 50
+      wolf: 100
+      bee: 100
+      turtle: 50
+      frog: 50
+      # Add any breedable mob by its Bukkit type name (lowercase). Types not
+      # listed here are never capped.
 
   smart_entity_removal:              # [OFF] mass-deleted farms, disabled in code
     # The original logic deleted every entity of the most common type across
@@ -221,6 +258,62 @@ mob_ai:
     enabled: false
     radius: 32
     invulnerable: true
+
+# ----------------------------------------------------------
+# Villager optimization  ->  [OK] targets packed breeders / trading halls
+# ----------------------------------------------------------
+# The classic "why is my server lagging" build: a pen with 10+ villagers all
+# colliding, all running AI, forever jumping against the water/walls. This
+# module has three INDEPENDENT levers -- each can be tuned or turned off on its
+# own. All periodic work runs on a timer (not per-tick, not per-mob), so its
+# cost does not grow with villager count, and state is only written when it
+# changes (no redundant packets).
+villager_optimization:
+  enabled: true
+  # How often (in ticks) the collision/AI scan runs. 20 ticks = 1 second.
+  # Clamped to a 20-tick minimum in code. Higher = cheaper, slightly less
+  # responsive when players walk up to a hall.
+  check_interval_ticks: 100
+
+  # Entity push/collision is the DOMINANT cost in a packed pen -- it grows with
+  # the square of the villager count (everyone shoves everyone). Once a chunk
+  # holds MORE than this many villagers, their collision is switched off: they
+  # still breed, trade and restock, they just stop pushing each other. This is
+  # the single biggest win and has essentially no downside for a breeder.
+  # Set to 0 to disable this lever (villagers keep vanilla collision).
+  disable_collision_above_per_chunk: 6
+
+  # Villager AI (pathfinding + the water/wall-jumping loop) is the other big
+  # cost. Instead of HARD-FREEZING it when nobody's around -- which leaves
+  # villagers standing dead-still and looks like a broken/lagging server --
+  # this THROTTLES it: while no player is within `radius`, each villager's AI
+  # goals run only a fraction of ticks, so they still wander and turn (just
+  # sluggishly, like normal idling) while shedding most of the AI cost. The
+  # cycle is phase-staggered per villager, so a pen never freezes in unison --
+  # at any moment part of the herd is moving. Full-speed AI resumes when a
+  # player comes near.
+  # NOTE: this slows (does not stop) villager-driven farms (e.g. iron farms)
+  # while no player is within the radius. If you run AFK villager farms, raise
+  # the radius past your AFK spot, push efficiency_percent to 100, or disable.
+  throttle_ai_when_no_players_nearby:
+    enabled: true
+    radius: 24
+    # AI "efficiency" while no player is near, as a percentage (1-100). 30 =
+    # AI goals run ~30% as often (~70% of the AI cost saved) while villagers
+    # still visibly move. 100 = no throttling; lower = cheaper but more
+    # sluggish/noticeable. Never fully freezes: at least 1 tick of AI per
+    # cycle always runs.
+    efficiency_percent: 30
+    # Length of the on/off cycle in ticks (20 = 1s). The "on" window is
+    # efficiency_percent of this. Smaller = smoother movement, more toggles;
+    # larger = fewer toggles, choppier idling.
+    cycle_ticks: 20
+
+  # Stop a breeder from growing without bound. Above this many villagers in a
+  # chunk, new BREEDING is cancelled (trades, restock and existing villagers
+  # are untouched -- villagers are NEVER killed, matching the plugin's
+  # pause-don't-wipe policy). Set to 0 to allow unlimited breeding.
+  max_per_chunk: 20
 
 # ----------------------------------------------------------
 # Chunk-loading throttle  ->  [OFF] disabled in code
