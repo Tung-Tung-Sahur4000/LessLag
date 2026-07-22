@@ -21,6 +21,10 @@
 - added: Explosion Queue System
 - added: (WIP) Web interface with login system for a web based performance data viewer (will be released in a future update)
 
+## v0.0.8
+- fixed: item pickup with a full inventory. In `"full"` pickup mode a stacked ground item (e.g. "Cobblestone x2000") was rejected outright whenever it couldn't ALL fit — so a full inventory holding a partial stack of the same item (say 30/64) couldn't top that stack off, even though vanilla would. It now falls back to filling existing partial stacks of the same item (never occupying an empty slot), leaving the remainder on the ground with its count decremented. Applies to both player pickups and hopper/container pickups.
+- fixed: "does it all fit" was measured against a player's full inventory including armour and offhand slots, which `addItem` never fills — an empty helmet slot could look like free space. The fit check now uses only the storage slots that pickups actually go into.
+
 ## v0.0.7
 - added: villager optimizer (`villager_optimization`) — targets the classic lag build (a packed breeder / trading hall with 10+ villagers all colliding and running AI). Three independent, individually-tunable levers, all driven by one timer pass (cost does not grow with villager count): (1) disable entity collision in chunks over a per-chunk threshold — the dominant O(n²) push cost — while breeding/trading continue; (2) throttle villager AI via a phase-staggered duty cycle when no player is within a radius (villagers still idle-wander instead of hard-freezing, so it doesn't look broken); (3) a per-chunk breeding soft-cap. Adds `/lesslag villagers` for live stats (counts, throttle state, per-scan cost).
 - added: global breedable population caps (`entity_management.breedable_global_limits`) — server-wide per-type caps for farm/breedable mobs. Above a type's limit, further breeding and egg-hatching of that type is paused across the server until the population drops; existing mobs are never killed (pause-don't-wipe), and hostile mobs are never affected. Counts are of loaded entities, refreshed ~every 10s.

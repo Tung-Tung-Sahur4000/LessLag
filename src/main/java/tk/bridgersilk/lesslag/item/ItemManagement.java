@@ -574,7 +574,11 @@ public class ItemManagement implements Listener {
 	}
 
     private HashMap<Integer, ItemStack> simulateAddItem(Inventory inv, ItemStack stack) {
-        ItemStack[] contents = inv.getContents().clone();
+        // Measure against the storage slots addItem actually fills. A player
+        // inventory's getContents() also returns armour + offhand slots, which
+        // addItem never uses -- counting those as free space made "does it all
+        // fit" wrong (an empty helmet slot looked like room for another stack).
+        ItemStack[] contents = inv.getStorageContents().clone();
         HashMap<Integer, ItemStack> leftovers = new HashMap<>();
         ItemStack clone = stack.clone();
 
@@ -604,6 +608,39 @@ public class ItemManagement implements Listener {
             leftovers.put(0, clone);
         }
         return leftovers;
+    }
+
+    // Tops off existing, non-full stacks of the SAME item without ever
+    // occupying an empty slot -- exactly what vanilla still does when the
+    // inventory is otherwise full but holds a partial stack of that item.
+    // "full" pickup mode is all-or-nothing for taking the WHOLE ground stack,
+    // but a full inventory that can still absorb some of the same item into a
+    // partial stack should not have the pickup rejected outright. Returns how
+    // many items were absorbed (0 if there was no room in any partial stack).
+    private int topOffPartialStacks(Inventory inv, ItemStack cleaned, int total) {
+        ItemStack[] contents = inv.getStorageContents();
+        int remaining = total;
+
+        for (int i = 0; i < contents.length && remaining > 0; i++) {
+            ItemStack current = contents[i];
+            if (current == null || current.getType() == Material.AIR) continue;
+            if (!current.isSimilar(cleaned)) continue;
+
+            int space = current.getMaxStackSize() - current.getAmount();
+            if (space <= 0) continue;
+
+            int add = Math.min(space, remaining);
+            current.setAmount(current.getAmount() + add);
+            remaining -= add;
+        }
+
+        int absorbed = total - remaining;
+        if (absorbed > 0) {
+            // Write the mutated slots back; getStorageContents() may hand back
+            // copies rather than live references depending on the inventory.
+            inv.setStorageContents(contents);
+        }
+        return absorbed;
     }
 
     @EventHandler
@@ -641,7 +678,16 @@ public class ItemManagement implements Listener {
                 inv.addItem(testStack);
                 despawnItem(item);
             } else {
-                event.setCancelled(true);
+                // The whole stack won't fit, but a full inventory can still have
+                // room in a partial stack of the same item -- top that off
+                // instead of rejecting the pickup entirely (vanilla behaviour).
+                int toppedOff = topOffPartialStacks(inv, cleanedItem, totalAmount);
+                if (toppedOff >= totalAmount) {
+                    despawnItem(item);
+                } else if (toppedOff > 0) {
+                    setStackedAmount(item, totalAmount - toppedOff);
+                    updateHologram(item);
+                }
             }
         }
 
@@ -692,7 +738,19 @@ public class ItemManagement implements Listener {
                 playPickupSound(player);
                 despawnItem(item);
             } else {
-                event.setCancelled(true);
+                // The whole stack won't fit, but a full inventory can still have
+                // room in a partial stack of the same item -- top that off
+                // instead of rejecting the pickup entirely (vanilla behaviour).
+                int toppedOff = topOffPartialStacks(player.getInventory(), cleanedItem, totalAmount);
+                if (toppedOff > 0) {
+                    playPickupSound(player);
+                    if (toppedOff >= totalAmount) {
+                        despawnItem(item);
+                    } else {
+                        setStackedAmount(item, totalAmount - toppedOff);
+                        updateHologram(item);
+                    }
+                }
             }
         }
 
