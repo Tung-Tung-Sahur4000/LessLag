@@ -55,7 +55,6 @@ public class ItemManagement implements Listener {
 	// of a per-item getNearbyEntities() spatial query (which was O(N^2)).
 	private int cellSize;
 	private String hologramFormat;
-	private String pickupBehavior;
 
 	// Water / bubble-column optimisation. Items caught in a bubble column
 	// (soul sand / magma) or flowing water get shot up and fall repeatedly, so
@@ -111,7 +110,6 @@ public class ItemManagement implements Listener {
 		cellSize = Math.max(1, (int) Math.round(stackRadius));
 		hologramFormat = ChatColor.translateAlternateColorCodes('&',
 				config.getString("item_management.item_stacking.hologram_format", "&e{item_name}&f x{amount}"));
-		pickupBehavior = config.getString("item_management.item_stacking.pickup_behavior", "partial").toLowerCase();
 
 		waterStackingEnabled = config.getBoolean("item_management.water_stacking.enabled", true);
 		waterVerticalRadius = config.getDouble("item_management.water_stacking.vertical_radius", 12.0);
@@ -573,69 +571,18 @@ public class ItemManagement implements Listener {
 		return Character.toUpperCase(name.charAt(0)) + name.substring(1);
 	}
 
-    private HashMap<Integer, ItemStack> simulateAddItem(Inventory inv, ItemStack stack) {
-        // Measure against the storage slots addItem actually fills. A player
-        // inventory's getContents() also returns armour + offhand slots, which
-        // addItem never uses -- counting those as free space made "does it all
-        // fit" wrong (an empty helmet slot looked like room for another stack).
-        ItemStack[] contents = inv.getStorageContents().clone();
-        HashMap<Integer, ItemStack> leftovers = new HashMap<>();
-        ItemStack clone = stack.clone();
-
-        for (int i = 0; i < contents.length && clone.getAmount() > 0; i++) {
-            ItemStack current = contents[i];
-
-            if (current == null || current.getType() == Material.AIR) {
-                int max = clone.getMaxStackSize();
-                if (clone.getAmount() <= max) {
-                    clone.setAmount(0);
-                } else {
-                    clone.setAmount(clone.getAmount() - max);
-                }
-            } else if (current.isSimilar(clone)) {
-                int space = current.getMaxStackSize() - current.getAmount();
-                if (space > 0) {
-                    if (clone.getAmount() <= space) {
-                        clone.setAmount(0);
-                    } else {
-                        clone.setAmount(clone.getAmount() - space);
-                    }
-                }
-            }
-        }
-
-        if (clone.getAmount() > 0) {
-            leftovers.put(0, clone);
-        }
-        return leftovers;
-    }
-
-    // Picks up as much of the ground stack as physically fits into the
-    // inventory: it tops off existing partial stacks of the SAME item AND fills
-    // empty slots, exactly like vanilla. Only what fits is taken; whatever does
-    // not fit stays on the ground. Returns how many items were actually
-    // absorbed (0 if the item can't go anywhere).
+    // Picks up a stacked ground item into `inv`, taking as much as physically
+    // fits and leaving the rest on the ground. addItem does exactly the vanilla
+    // thing: it tops off existing partial stacks of the SAME item first, then
+    // fills empty slots, and hands back whatever didn't fit. That gives us the
+    // "only what fits" behaviour AND same-item validation for free -- a slot
+    // holding a different item is never isSimilar(), so it's never touched, and
+    // an item the inventory has no room for is simply left where it is. addItem
+    // also splits a requested amount larger than one max stack across slots.
     //
-    // addItem naturally does same-item validation: it only ever merges into
-    // slots holding an isSimilar() item (or empty ones), so a different item on
-    // the ground never disturbs unrelated stacks -- it simply finds no room and
-    // is left behind. It also handles a requested amount larger than one max
-    // stack, splitting it across as many slots as fit.
-    private int pickUpWhatFits(Inventory inv, ItemStack cleaned, int total) {
-        HashMap<Integer, ItemStack> leftovers = inv.addItem(createItemWithAmount(cleaned, total));
-        int notFitted = leftovers.values().stream().mapToInt(ItemStack::getAmount).sum();
-        return total - notFitted;
-    }
-
-    @EventHandler
-    public void onInventoryItemPickup(InventoryPickupItemEvent event) {
-        Item item = event.getItem();
-        UUID id = item.getUniqueId();
-        Inventory inv = event.getInventory();
-
-        if (!stackedAmounts.containsKey(id)) return;
-
-        int totalAmount = stackedAmounts.get(id);
+    // Returns how many items were actually picked up (0 if there was no room).
+    private int pickUpStacked(Item item, Inventory inv) {
+        int totalAmount = stackedAmounts.get(item.getUniqueId());
 
         ItemStack cleanedItem = item.getItemStack().clone();
         ItemMeta meta = cleanedItem.getItemMeta();
@@ -644,40 +591,25 @@ public class ItemManagement implements Listener {
             cleanedItem.setItemMeta(meta);
         }
 
-        if (pickupBehavior.equals("partial")) {
-            int pickedUp = pickUpWhatFits(inv, cleanedItem, totalAmount);
+        HashMap<Integer, ItemStack> leftovers = inv.addItem(createItemWithAmount(cleanedItem, totalAmount));
+        int notFitted = leftovers.values().stream().mapToInt(ItemStack::getAmount).sum();
+        int pickedUp = totalAmount - notFitted;
 
-            if (pickedUp >= totalAmount) {
-                despawnItem(item);
-            } else if (pickedUp > 0) {
-                setStackedAmount(item, totalAmount - pickedUp);
-                updateHologram(item);
-            }
-        } else if (pickupBehavior.equals("full")) {
-            ItemStack testStack = createItemWithAmount(cleanedItem, totalAmount);
-            HashMap<Integer, ItemStack> simulatedLeftovers = simulateAddItem(inv, testStack);
-
-            if (simulatedLeftovers.isEmpty()) {
-                // Whole stack fits -> take it all in one go.
-                inv.addItem(testStack);
-                despawnItem(item);
-            } else {
-                // The whole stack won't fit, so pick up as much as DOES fit --
-                // top off same-item stacks AND fill empty slots -- and leave the
-                // remainder on the ground. Previously this only topped off
-                // existing same-item partial stacks and ignored empty slots, so
-                // an item that could partially fit a free slot was skipped
-                // outright.
-                int pickedUp = pickUpWhatFits(inv, cleanedItem, totalAmount);
-                if (pickedUp >= totalAmount) {
-                    despawnItem(item);
-                } else if (pickedUp > 0) {
-                    setStackedAmount(item, totalAmount - pickedUp);
-                    updateHologram(item);
-                }
-            }
+        if (pickedUp >= totalAmount) {
+            despawnItem(item);
+        } else if (pickedUp > 0) {
+            setStackedAmount(item, totalAmount - pickedUp);
+            updateHologram(item);
         }
+        return pickedUp;
+    }
 
+    @EventHandler
+    public void onInventoryItemPickup(InventoryPickupItemEvent event) {
+        Item item = event.getItem();
+        if (!stackedAmounts.containsKey(item.getUniqueId())) return;
+
+        pickUpStacked(item, event.getInventory());
         event.setCancelled(true);
     }
 
@@ -686,62 +618,14 @@ public class ItemManagement implements Listener {
         if (!(event.getEntity() instanceof Player player)) return;
 
         Item item = event.getItem();
-        UUID id = item.getUniqueId();
+        if (!stackedAmounts.containsKey(item.getUniqueId())) return;
 
-        if (!stackedAmounts.containsKey(id)) return;
-
-        int totalAmount = stackedAmounts.get(id);
-
-        ItemStack cleanedItem = item.getItemStack().clone();
-        ItemMeta meta = cleanedItem.getItemMeta();
-        if (meta != null) {
-            meta.getPersistentDataContainer().remove(STACK_KEY);
-            cleanedItem.setItemMeta(meta);
-        }
-
-        if (pickupBehavior.equals("partial")) {
-            int pickedUp = pickUpWhatFits(player.getInventory(), cleanedItem, totalAmount);
-
-            if (pickedUp > 0) {
-                // The vanilla pickup event is cancelled below, which
-                // suppresses the normal "pop" sound. Replay it manually
-                // so stacked pickups aren't silent.
-                playPickupSound(player);
-            }
-
-            if (pickedUp >= totalAmount) {
-                despawnItem(item);
-            } else if (pickedUp > 0) {
-                setStackedAmount(item, totalAmount - pickedUp);
-                updateHologram(item);
-            }
-        } else if (pickupBehavior.equals("full")) {
-            ItemStack testStack = createItemWithAmount(cleanedItem, totalAmount);
-            HashMap<Integer, ItemStack> simulatedLeftovers = simulateAddItem(player.getInventory(), testStack);
-
-            if (simulatedLeftovers.isEmpty()) {
-                // Whole stack fits -> take it all in one go.
-                player.getInventory().addItem(testStack);
-                playPickupSound(player);
-                despawnItem(item);
-            } else {
-                // The whole stack won't fit, so pick up as much as DOES fit --
-                // top off same-item stacks AND fill empty slots -- and leave the
-                // remainder on the ground. Previously this only topped off
-                // existing same-item partial stacks and ignored empty slots, so
-                // an item that could partially fit a free slot was skipped
-                // outright.
-                int pickedUp = pickUpWhatFits(player.getInventory(), cleanedItem, totalAmount);
-                if (pickedUp > 0) {
-                    playPickupSound(player);
-                    if (pickedUp >= totalAmount) {
-                        despawnItem(item);
-                    } else {
-                        setStackedAmount(item, totalAmount - pickedUp);
-                        updateHologram(item);
-                    }
-                }
-            }
+        int pickedUp = pickUpStacked(item, player.getInventory());
+        if (pickedUp > 0) {
+            // The vanilla pickup event is cancelled below, which suppresses the
+            // normal "pop" sound. Replay it manually so stacked pickups aren't
+            // silent.
+            playPickupSound(player);
         }
 
         event.setCancelled(true);
