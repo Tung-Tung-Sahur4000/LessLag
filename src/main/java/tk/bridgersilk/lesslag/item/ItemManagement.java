@@ -56,6 +56,13 @@ public class ItemManagement implements Listener {
 	private int cellSize;
 	private String hologramFormat;
 
+	// When true, every stacked-item pickup logs what it did (item, tracked
+	// amount, how much was picked up, how much was left on the ground). Off by
+	// default; turn it on to diagnose "it won't pick up" reports on a live
+	// server -- the log line shows whether the inventory genuinely had no room
+	// or something else is wrong.
+	private boolean debugPickup;
+
 	// Water / bubble-column optimisation. Items caught in a bubble column
 	// (soul sand / magma) or flowing water get shot up and fall repeatedly, so
 	// they oscillate across many blocks and often sit just outside the normal
@@ -110,6 +117,7 @@ public class ItemManagement implements Listener {
 		cellSize = Math.max(1, (int) Math.round(stackRadius));
 		hologramFormat = ChatColor.translateAlternateColorCodes('&',
 				config.getString("item_management.item_stacking.hologram_format", "&e{item_name}&f x{amount}"));
+		debugPickup = config.getBoolean("item_management.item_stacking.debug", false);
 
 		waterStackingEnabled = config.getBoolean("item_management.water_stacking.enabled", true);
 		waterVerticalRadius = config.getDouble("item_management.water_stacking.vertical_radius", 12.0);
@@ -143,19 +151,6 @@ public class ItemManagement implements Listener {
 				})
 				.filter(Objects::nonNull)
 				.collect(Collectors.toSet());
-	}
-
-	public void reload() {
-		this.config = plugin.getConfig();
-		loadConfigValues();
-
-		stopAutoClearTask();
-		startAutoClearTask();
-        stopStackingTask();
-        // Clear only the in-memory map; the amounts persisted on the item
-        // entities survive and are recovered when the task restarts below.
-        stackedAmounts.clear();
-        startStackingTask();
 	}
 
 	private void startAutoClearTask() {
@@ -571,6 +566,30 @@ public class ItemManagement implements Listener {
 		return Character.toUpperCase(name.charAt(0)) + name.substring(1);
 	}
 
+    // Resolves the true stacked amount for a ground item. Prefers the in-memory
+    // tracking map, but falls back to the amount persisted on the item ENTITY
+    // (PDC) when the map doesn't know it -- the brief window before the
+    // maintenance task (re)adopts an item into the map: right after a reload,
+    // when its chunk has just (re)loaded, or after the per-second ghost-cleanup
+    // pruned it. A stacked item's VISIBLE stack was forced to 1 when it was
+    // stacked, so without this fallback such an item would look untracked and
+    // vanilla would pick up a single item, silently dropping the rest of the
+    // pile. Re-adopts into the map so holograms/counts stay consistent. Returns
+    // -1 for a genuinely unstacked item (no map entry, no PDC) -- vanilla should
+    // handle that one normally.
+    private int resolveStackedAmount(Item item) {
+        Integer mapped = stackedAmounts.get(item.getUniqueId());
+        if (mapped != null) return mapped;
+
+        Integer persisted = item.getPersistentDataContainer()
+                .get(AMOUNT_KEY, PersistentDataType.INTEGER);
+        if (persisted != null) {
+            stackedAmounts.put(item.getUniqueId(), persisted);
+            return persisted;
+        }
+        return -1;
+    }
+
     // Picks up a stacked ground item into `inv`, taking as much as physically
     // fits and leaving the rest on the ground. addItem does exactly the vanilla
     // thing: it tops off existing partial stacks of the SAME item first, then
@@ -581,9 +600,7 @@ public class ItemManagement implements Listener {
     // also splits a requested amount larger than one max stack across slots.
     //
     // Returns how many items were actually picked up (0 if there was no room).
-    private int pickUpStacked(Item item, Inventory inv) {
-        int totalAmount = stackedAmounts.get(item.getUniqueId());
-
+    private int pickUpStacked(Item item, Inventory inv, int totalAmount) {
         ItemStack cleanedItem = item.getItemStack().clone();
         ItemMeta meta = cleanedItem.getItemMeta();
         if (meta != null) {
@@ -591,9 +608,27 @@ public class ItemManagement implements Listener {
             cleanedItem.setItemMeta(meta);
         }
 
+        // Guard against a corrupt/empty ground stack: addItem silently ignores
+        // AIR (reporting no leftovers), which would otherwise despawn the item
+        // as if it had all been picked up while the player received nothing.
+        if (cleanedItem.getType() == Material.AIR || totalAmount <= 0) {
+            if (debugPickup) {
+                plugin.getLogger().warning("[pickup] skipped empty/invalid stack: type="
+                        + cleanedItem.getType() + " amount=" + totalAmount);
+            }
+            return 0;
+        }
+
         HashMap<Integer, ItemStack> leftovers = inv.addItem(createItemWithAmount(cleanedItem, totalAmount));
         int notFitted = leftovers.values().stream().mapToInt(ItemStack::getAmount).sum();
         int pickedUp = totalAmount - notFitted;
+
+        if (debugPickup) {
+            plugin.getLogger().info(String.format(
+                    "[pickup] %s into %s: tracked=%d pickedUp=%d leftOnGround=%d",
+                    cleanedItem.getType(), inv.getType(), totalAmount, pickedUp,
+                    totalAmount - pickedUp));
+        }
 
         if (pickedUp >= totalAmount) {
             despawnItem(item);
@@ -607,9 +642,10 @@ public class ItemManagement implements Listener {
     @EventHandler
     public void onInventoryItemPickup(InventoryPickupItemEvent event) {
         Item item = event.getItem();
-        if (!stackedAmounts.containsKey(item.getUniqueId())) return;
+        int totalAmount = resolveStackedAmount(item);
+        if (totalAmount < 0) return; // not a stacked item -> let vanilla handle it
 
-        pickUpStacked(item, event.getInventory());
+        pickUpStacked(item, event.getInventory(), totalAmount);
         event.setCancelled(true);
     }
 
@@ -618,9 +654,10 @@ public class ItemManagement implements Listener {
         if (!(event.getEntity() instanceof Player player)) return;
 
         Item item = event.getItem();
-        if (!stackedAmounts.containsKey(item.getUniqueId())) return;
+        int totalAmount = resolveStackedAmount(item);
+        if (totalAmount < 0) return; // not a stacked item -> let vanilla handle it
 
-        int pickedUp = pickUpStacked(item, player.getInventory());
+        int pickedUp = pickUpStacked(item, player.getInventory(), totalAmount);
         if (pickedUp > 0) {
             // The vanilla pickup event is cancelled below, which suppresses the
             // normal "pop" sound. Replay it manually so stacked pickups aren't
