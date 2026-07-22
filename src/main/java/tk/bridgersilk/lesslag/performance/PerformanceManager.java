@@ -31,6 +31,15 @@ public class PerformanceManager {
 	private double tickSpeedThreshold;
 	private int decreaseTickSpeedTo;
 
+	private boolean villagerOptEnabled;
+	private int villagerCheckInterval;
+	private int villagerCollisionThreshold;
+	private boolean villagerThrottleAiEnabled;
+	private int villagerThrottleAiRadius;
+	private int villagerThrottlePeriodTicks;
+	private int villagerThrottleEfficiencyPercent;
+	private int villagerMaxPerChunk;
+
 	private RedstoneListener redstoneListener;
 	private FallingBlockListener fallingBlockListener;
 	private FluidListener fluidListener;
@@ -38,6 +47,7 @@ public class PerformanceManager {
 	private EnderPearlListener enderPearlListener;
 	private CommandBlockListener commandBlockListener;
 	private TickSpeedListener tickSpeedListener;
+	private VillagerOptimizer villagerOptimizer;
 
 	public PerformanceManager(LessLag plugin) {
 		this.plugin = plugin;
@@ -114,6 +124,38 @@ public class PerformanceManager {
 		tickSpeedThreshold = config.getDouble(
 			"performance_controls.decrease_tickspeed.decrease_below_tps"
 		);
+
+		villagerOptEnabled = config.getBoolean(
+			"villager_optimization.enabled"
+		);
+
+		villagerCheckInterval = config.getInt(
+			"villager_optimization.check_interval_ticks", 100
+		);
+
+		villagerCollisionThreshold = config.getInt(
+			"villager_optimization.disable_collision_above_per_chunk", 6
+		);
+
+		villagerThrottleAiEnabled = config.getBoolean(
+			"villager_optimization.throttle_ai_when_no_players_nearby.enabled"
+		);
+
+		villagerThrottleAiRadius = config.getInt(
+			"villager_optimization.throttle_ai_when_no_players_nearby.radius", 24
+		);
+
+		villagerThrottlePeriodTicks = config.getInt(
+			"villager_optimization.throttle_ai_when_no_players_nearby.cycle_ticks", 20
+		);
+
+		villagerThrottleEfficiencyPercent = config.getInt(
+			"villager_optimization.throttle_ai_when_no_players_nearby.efficiency_percent", 30
+		);
+
+		villagerMaxPerChunk = config.getInt(
+			"villager_optimization.max_per_chunk", 20
+		);
 	}
 
 	private void registerListeners() {
@@ -167,6 +209,24 @@ public class PerformanceManager {
 				tickSpeedThreshold
 			);
 		}
+
+		if (villagerOptEnabled) {
+			villagerOptimizer = new VillagerOptimizer(
+				plugin,
+				villagerCheckInterval,
+				villagerCollisionThreshold,
+				villagerThrottleAiEnabled,
+				villagerThrottleAiRadius,
+				villagerThrottlePeriodTicks,
+				villagerThrottleEfficiencyPercent,
+				villagerMaxPerChunk
+			);
+		}
+	}
+
+	/** The live villager optimizer, or null if disabled in config. */
+	public VillagerOptimizer getVillagerOptimizer() {
+		return villagerOptimizer;
 	}
 
 	public void disable() {
@@ -206,6 +266,11 @@ public class PerformanceManager {
 		if (tickSpeedListener != null) {
 			tickSpeedListener.unregister();
 			tickSpeedListener = null;
+		}
+
+		if (villagerOptimizer != null) {
+			villagerOptimizer.unregister();
+			villagerOptimizer = null;
 		}
 	}
 }

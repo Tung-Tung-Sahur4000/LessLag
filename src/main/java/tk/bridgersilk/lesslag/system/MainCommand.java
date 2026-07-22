@@ -11,6 +11,7 @@ import org.bukkit.command.TabCompleter;
 import org.bukkit.configuration.file.FileConfiguration;
 
 import tk.bridgersilk.lesslag.LessLag;
+import tk.bridgersilk.lesslag.performance.VillagerOptimizer;
 
 public class MainCommand
 	implements CommandExecutor, TabCompleter {
@@ -45,7 +46,7 @@ public class MainCommand
 			sender.sendMessage(
 				prefix
 					+ "§eUse /lesslag "
-					+ "<reload|info|profiler|worlds>"
+					+ "<reload|info|profiler|worlds|villagers>"
 			);
 
 			return true;
@@ -82,15 +83,89 @@ public class MainCommand
 				worldInfo.sendWorldInfo(sender);
 				break;
 
+			case "villagers":
+				handleVillagersCommand(sender, prefix);
+				break;
+
 			default:
 				sender.sendMessage(
 					prefix
 						+ "§cUnknown subcommand. Use /lesslag "
-						+ "<reload|info|profiler|worlds>"
+						+ "<reload|info|profiler|worlds|villagers>"
 				);
 		}
 
 		return true;
+	}
+
+	private void handleVillagersCommand(
+		CommandSender sender,
+		String prefix
+	) {
+		if (!sender.hasPermission("lesslag.admin")) {
+			sender.sendMessage(
+				prefix + "§cYou do not have permission for this."
+			);
+			return;
+		}
+
+		VillagerOptimizer opt =
+			plugin.getPerformanceManager() != null
+				? plugin.getPerformanceManager().getVillagerOptimizer()
+				: null;
+
+		if (opt == null) {
+			sender.sendMessage(
+				prefix
+					+ "§cVillager optimizer is disabled "
+					+ "(villager_optimization.enabled: false)."
+			);
+			return;
+		}
+
+		sender.sendMessage(prefix + "§e§lVillager Optimizer §7— live");
+		sender.sendMessage(
+			"§7 Villagers (loaded): §f" + opt.getStatTotal()
+		);
+		sender.sendMessage(
+			"§7  Full AI §8(player near)§7: §a" + opt.getStatNear()
+		);
+
+		if (opt.isThrottleActive()) {
+			sender.sendMessage(
+				"§7  Throttled §8(~" + opt.getThrottleEfficiencyPercent()
+					+ "%)§7: §6" + opt.getStatThrottled()
+					+ " §8outside " + opt.getThrottleRadius() + " blocks"
+			);
+		} else {
+			sender.sendMessage(
+				"§7  Throttled: §8off (efficiency 100% or disabled)"
+			);
+		}
+
+		if (opt.getCollisionThreshold() > 0) {
+			sender.sendMessage(
+				"§7  Collision off §8(>" + opt.getCollisionThreshold()
+					+ "/chunk)§7: §b" + opt.getStatCollisionOff()
+			);
+		} else {
+			sender.sendMessage("§7  Collision lever: §8off");
+		}
+
+		sender.sendMessage(
+			"§7 Breeding cap: §f"
+				+ (opt.getMaxPerChunk() > 0
+					? opt.getMaxPerChunk() + " §8/chunk"
+					: "§8off")
+		);
+		sender.sendMessage(
+			String.format(
+				"§7 Last scan cost: §f%.3f ms §8(every %ds) §7— this is the "
+					+ "plugin's own tick cost",
+				opt.getLastClassifyMillis(),
+				opt.getCheckIntervalTicks() / 20
+			)
+		);
 	}
 
 	@Override
@@ -106,7 +181,8 @@ public class MainCommand
 					"reload",
 					"info",
 					"profiler",
-					"worlds"
+					"worlds",
+					"villagers"
 				),
 				args[0]
 			);

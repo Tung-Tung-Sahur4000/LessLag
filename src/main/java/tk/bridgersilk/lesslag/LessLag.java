@@ -10,6 +10,7 @@ import com.comphenix.protocol.ProtocolManager;
 
 import tk.bridgersilk.lesslag.entity.CommandControlListener;
 import tk.bridgersilk.lesslag.entity.EntityManager;
+import tk.bridgersilk.lesslag.entity.BreedingCapListener;
 import tk.bridgersilk.lesslag.entity.SpawnControlListener;
 import tk.bridgersilk.lesslag.item.ItemManagement;
 import tk.bridgersilk.lesslag.performance.PerformanceManager;
@@ -67,6 +68,11 @@ public class LessLag extends JavaPlugin {
 
 		Bukkit.getPluginManager().registerEvents(
 			new SpawnControlListener(entityManager),
+			this
+		);
+
+		Bukkit.getPluginManager().registerEvents(
+			new BreedingCapListener(entityManager),
 			this
 		);
 
@@ -135,6 +141,14 @@ public class LessLag extends JavaPlugin {
 
 	public Profiler getProfiler() {
 		return profiler;
+	}
+
+	public PerformanceManager getPerformanceManager() {
+		return performanceManager;
+	}
+
+	public EntityManager getEntityManager() {
+		return entityManager;
 	}
 
 	public ExplosionQueueManager getExplosionQueueManager() {
@@ -213,24 +227,22 @@ public class LessLag extends JavaPlugin {
 		}
 
 		/*
-		 * Sweep every Bukkit event listener this plugin registered before
-		 * recreating anything. Without this, listeners that register in their
-		 * own constructor (ItemManagement) and the ones registered directly
-		 * below (PlayerJoin / PlayerTeleport / Chat / SpawnControl /
-		 * CommandControl) were never removed on reload -- each /lesslag reload
-		 * stacked another copy, so chat got counted twice (muting at half the
-		 * threshold), and joins/teleports/summons fired duplicate messages.
-		 * The managers re-register exactly one of each just below. (ProtocolLib
-		 * packet listeners are handled separately in Profiler/PlayerManager.)
-		 */
-		HandlerList.unregisterAll(this);
-
-		/*
 		 * Reload both Bukkit's configuration and the custom
 		 * ConfigManager configuration.
 		 */
 		reloadConfig();
 		configManager.reloadConfig();
+
+		/*
+		 * Clear every listener this plugin registered before rebuilding.
+		 * Several listeners (PlayerJoin/PlayerTeleport/Chat/SpawnControl/
+		 * CommandControl/BreedingCap) are registered as inline instances with
+		 * no field reference, so nothing else can unregister them -- without
+		 * this, each reload would stack a fresh copy on top of the old ones and
+		 * fire their handlers twice (then three times, ...). Managers recreated
+		 * below re-register their own listeners fresh.
+		 */
+		HandlerList.unregisterAll(this);
 
 		/*
 		 * Recreate all managers using the new configuration.
@@ -261,6 +273,11 @@ public class LessLag extends JavaPlugin {
 
 		Bukkit.getPluginManager().registerEvents(
 			new SpawnControlListener(entityManager),
+			this
+		);
+
+		Bukkit.getPluginManager().registerEvents(
+			new BreedingCapListener(entityManager),
 			this
 		);
 
