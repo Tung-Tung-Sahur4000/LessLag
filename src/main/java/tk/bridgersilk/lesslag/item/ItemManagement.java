@@ -1,5 +1,6 @@
 package tk.bridgersilk.lesslag.item;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -14,6 +15,9 @@ import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.Sound;
 import org.bukkit.World;
+import org.bukkit.block.Block;
+import org.bukkit.block.data.BlockData;
+import org.bukkit.block.data.Waterlogged;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Item;
@@ -46,14 +50,32 @@ public class ItemManagement implements Listener {
 
 	private boolean stackingEnabled;
 	private double stackRadius;
+	// Grid cell size (blocks) used to bucket items for merging, derived from
+	// stackRadius. Items in the same cell merge in a single O(N) pass instead
+	// of a per-item getNearbyEntities() spatial query (which was O(N^2)).
+	private int cellSize;
 	private String hologramFormat;
 	private String pickupBehavior;
+
+	// Water / bubble-column optimisation. Items caught in a bubble column
+	// (soul sand / magma) or flowing water get shot up and fall repeatedly, so
+	// they oscillate across many blocks and often sit just outside the normal
+	// vertical stack window -- leaving lots of separate, constantly-moving item
+	// entities (heavy move-packet + physics churn). When a world holds more than
+	// waterMinItems suspended-in-water items, the stacking search for those
+	// items reaches waterVerticalRadius blocks up/down (instead of stackRadius)
+	// so a whole column collapses into one stacked entity. It only ever merges
+	// (amounts preserved), never deletes.
+	private boolean waterStackingEnabled;
+	private double waterVerticalRadius;
+	private int waterMinItems;
 
 	// Per-item despawn countdown (replaces clearing every drop at once).
 	private boolean dropTimerEnabled;
 	private int despawnTicks;
 	private boolean showTimerInHologram;
 	private int countdownSeconds;
+	private String countdownFormat;
 	private Set<Material> dropTimerWhitelist;
 
 	// Hologram throttling for drop-heavy situations (mining, farms).
@@ -86,14 +108,23 @@ public class ItemManagement implements Listener {
 
 		stackingEnabled = config.getBoolean("item_management.item_stacking.enabled", true);
 		stackRadius = config.getDouble("item_management.item_stacking.stack_radius", 3.0);
+		cellSize = Math.max(1, (int) Math.round(stackRadius));
 		hologramFormat = ChatColor.translateAlternateColorCodes('&',
 				config.getString("item_management.item_stacking.hologram_format", "&e{item_name}&f x{amount}"));
 		pickupBehavior = config.getString("item_management.item_stacking.pickup_behavior", "partial").toLowerCase();
+
+		waterStackingEnabled = config.getBoolean("item_management.water_stacking.enabled", true);
+		waterVerticalRadius = config.getDouble("item_management.water_stacking.vertical_radius", 12.0);
+		waterMinItems = config.getInt("item_management.water_stacking.min_items", 4);
 
 		dropTimerEnabled = config.getBoolean("item_management.drop_timer.enabled", true);
 		despawnTicks = Math.max(1, config.getInt("item_management.drop_timer.despawn_seconds", 30)) * 20;
 		showTimerInHologram = config.getBoolean("item_management.drop_timer.show_in_hologram", true);
 		countdownSeconds = Math.max(0, config.getInt("item_management.drop_timer.countdown_seconds", 10));
+		// Bold + red by default so the final-seconds countdown stands out from
+		// the item name instead of blending in. {seconds} = live number.
+		countdownFormat = ChatColor.translateAlternateColorCodes('&',
+				config.getString("item_management.drop_timer.countdown_format", "&c&l[{seconds}s]"));
 		dropTimerWhitelist = parseMaterials(config.getStringList("item_management.drop_timer.whitelist"));
 
 		hologramEnabled = config.getBoolean("item_management.hologram.enabled", true);
@@ -164,6 +195,14 @@ public class ItemManagement implements Listener {
 
     // Runs every 20 ticks (1s). Only item entities are queried
     // (getEntitiesByClass) instead of scanning every entity in the world.
+    //
+    // Merging is grid-based: every item is bucketed once into a spatial cell
+    // (a single O(N) pass), then items are merged WITHIN each cell. The old
+    // approach called getNearbyEntities() for every item every second, which on
+    // a big drop (a TNT blast, a mob-farm dump) is O(N^2) -- each of N items
+    // rescans all N items in its chunk -- so the anti-lag merge became the lag
+    // spike. Grid bucketing does the same collapsing in O(N) with no
+    // per-item spatial query.
     private void itemMaintenanceTick() {
         passCount++;
 
@@ -175,6 +214,12 @@ public class ItemManagement implements Listener {
             var items = world.getEntitiesByClass(Item.class);
             HologramMode mode = hologramModeFor(items.size());
 
+            // Grid of same-locality items, and the flat list of survivors (used
+            // for hologram refresh and the optional water-column pass).
+            Map<Long, List<Item>> grid = stackingEnabled ? new HashMap<>() : null;
+            List<Item> live = new ArrayList<>();
+
+            // Single pass: drop-timer despawn, adopt new items, bucket the rest.
             for (Item item : items) {
                 if (item.isDead()) continue;
 
@@ -186,16 +231,43 @@ public class ItemManagement implements Listener {
                     continue;
                 }
 
-                if (stackingEnabled) {
-                    if (!stackedAmounts.containsKey(item.getUniqueId())) {
-                        adoptItem(item, mode);
-                    }
-                    stackNearbyItems(item, mode);
+                if (stackingEnabled && !stackedAmounts.containsKey(item.getUniqueId())) {
+                    adoptItem(item, mode);
                 }
 
                 if (seen != null) seen.add(item.getUniqueId());
+                live.add(item);
 
-                refreshHologram(item, mode);
+                if (grid != null) {
+                    var loc = item.getLocation();
+                    long key = cellKey(loc.getBlockX(), loc.getBlockY(), loc.getBlockZ(),
+                            cellSize, cellSize);
+                    grid.computeIfAbsent(key, k -> new ArrayList<>()).add(item);
+                }
+            }
+
+            // Merge each cell's group (cheap: items are already grouped by
+            // locality, so this is O(N) overall, not O(N^2)).
+            if (grid != null) {
+                for (List<Item> cell : grid.values()) {
+                    if (cell.size() > 1) mergeGroup(cell, mode);
+                }
+
+                // Water/bubble-column columns: items shot up and down a bubble
+                // column land in different vertical cells, so normal cell
+                // merging can't collapse the whole elevator. Re-merge the
+                // SURVIVING water items by column. This runs only on survivors,
+                // so its cost scales with entities left after normal merging --
+                // not with the raw drop size -- and it never touches the
+                // O(N^2) path.
+                if (waterStackingEnabled) {
+                    mergeWaterColumns(live, mode);
+                }
+            }
+
+            // Hologram refresh on survivors (merged-away items are now dead).
+            for (Item item : live) {
+                if (!item.isDead()) refreshHologram(item, mode);
             }
         }
 
@@ -205,6 +277,108 @@ public class ItemManagement implements Listener {
         // re-adopted if the item ever comes back.
         if (seen != null) {
             stackedAmounts.keySet().retainAll(seen);
+        }
+    }
+
+    // Packs a cell coordinate into a single long map key: 26 bits X, 26 bits Z,
+    // 12 bits Y (Y range is tiny). Exact within the world border, so distinct
+    // cells never collide -- and even if they did, the per-kind bucketing in
+    // mergeGroup still only ever combines items whose normalised ItemStacks are
+    // equal, so a collision could never merge genuinely different items.
+    private static long cellKey(int bx, int by, int bz, int horiz, int vert) {
+        long cx = Math.floorDiv(bx, horiz);
+        long cy = Math.floorDiv(by, vert);
+        long cz = Math.floorDiv(bz, horiz);
+        return ((cx & 0x3FFFFFFL) << 38) | ((cz & 0x3FFFFFFL) << 12) | (cy & 0xFFFL);
+    }
+
+    // Merges every mergeable item in a group into one surviving entity, summing
+    // the stacked amounts. A group is a grid cell (or a water column) and may
+    // hold many different item kinds. We bucket by the normalised ItemStack
+    // (a single item, so amount can't split a kind) in ONE O(m) pass, then
+    // collapse each kind linearly. Equal normalised stacks are exactly the
+    // items that stack, so this needs no O(m^2) pairwise scan -- which is what
+    // made a pile of many DISTINCT items (e.g. thousands of renamed items
+    // dumped in one spot) an O(m^2) tick spike. Only ever merges (amounts
+    // preserved) -- never deletes contents.
+    private void mergeGroup(List<Item> group, HologramMode mode) {
+        Map<ItemStack, List<Item>> byKind = new HashMap<>();
+        for (Item item : group) {
+            if (item.isDead()) continue;
+            ItemStack key = item.getItemStack().clone();
+            key.setAmount(1);
+            byKind.computeIfAbsent(key, k -> new ArrayList<>()).add(item);
+        }
+
+        for (List<Item> kind : byKind.values()) {
+            if (kind.size() < 2) continue;
+
+            Item base = kind.get(0);
+            // Sum in a long so a runaway farm/stasis pile can't wrap the int.
+            long total = stackedAmounts.getOrDefault(base.getUniqueId(), base.getItemStack().getAmount());
+            // Track the youngest age in the merged set so the combined stack
+            // adopts the freshest despawn timer (see setTicksLived below).
+            int minAge = base.getTicksLived();
+
+            for (int i = 1; i < kind.size(); i++) {
+                Item other = kind.get(i);
+                total += stackedAmounts.getOrDefault(other.getUniqueId(), other.getItemStack().getAmount());
+                minAge = Math.min(minAge, other.getTicksLived());
+
+                clearStackedAmount(other);
+                other.remove();
+            }
+
+            // Clamp to the int range: the amount is stored as an int on the
+            // entity PDC and in the map, so an un-clamped sum past 2.1B would
+            // wrap negative and corrupt the count / hologram / pickup.
+            int amount = (int) Math.min(total, Integer.MAX_VALUE);
+
+            ItemStack newStack = base.getItemStack().clone();
+            newStack.setAmount(1);
+            newStack = tagStackedItem(newStack);
+
+            base.setItemStack(newStack);
+            setStackedAmount(base, amount);
+
+            // Refresh the drop timer to the freshest item so newly dropped items
+            // aren't instantly cut short by an older pile's countdown.
+            // setTicksLived requires >= 1. An idle pile still expires normally.
+            if (dropTimerEnabled) {
+                base.setTicksLived(Math.max(1, minAge));
+            }
+
+            if (mode != HologramMode.HIDDEN) {
+                updateHologram(base);
+            }
+        }
+    }
+
+    // Second, water-only merge pass over the survivors: buckets items that are
+    // in water by a TALL cell (tight horizontally at cellSize, up to
+    // waterVerticalRadius blocks vertically) so a whole bubble-column elevator
+    // collapses into one entity. Skipped unless more than waterMinItems water
+    // item entities remain, so a couple of casually-floating drops keep vanilla
+    // behaviour. Cost scales with surviving entities, not with the raw drop.
+    private void mergeWaterColumns(List<Item> live, HologramMode mode) {
+        int vert = Math.max(1, (int) Math.ceil(waterVerticalRadius));
+
+        Map<Long, List<Item>> columns = null;
+        int waterCount = 0;
+
+        for (Item item : live) {
+            if (item.isDead() || !isSuspendedInWater(item)) continue;
+            waterCount++;
+            var loc = item.getLocation();
+            long key = cellKey(loc.getBlockX(), loc.getBlockY(), loc.getBlockZ(), cellSize, vert);
+            if (columns == null) columns = new HashMap<>();
+            columns.computeIfAbsent(key, k -> new ArrayList<>()).add(item);
+        }
+
+        if (columns == null || waterCount <= waterMinItems) return;
+
+        for (List<Item> column : columns.values()) {
+            if (column.size() > 1) mergeGroup(column, mode);
         }
     }
 
@@ -333,84 +507,6 @@ public class ItemManagement implements Listener {
         return tagged;
     }
 
-	private void stackNearbyItems(Item baseItem, HologramMode mode) {
-        if (!stackingEnabled || baseItem.isDead()) return;
-
-        ItemStack baseStack = baseItem.getItemStack();
-        int baseAmount = stackedAmounts.getOrDefault(baseItem.getUniqueId(), baseStack.getAmount());
-
-        List<Item> toStack = baseItem.getNearbyEntities(stackRadius, stackRadius, stackRadius).stream()
-                .filter(e -> e instanceof Item)
-                .map(e -> (Item) e)
-                .filter(i -> !i.equals(baseItem))
-                .filter(i -> canStack(baseStack, i.getItemStack()))
-                .collect(Collectors.toList());
-
-        if (toStack.isEmpty()) return;
-
-        // Track the youngest age in the merged set so the combined stack
-        // adopts the freshest despawn timer (see setTicksLived below).
-        int minAge = baseItem.getTicksLived();
-
-        for (Item other : toStack) {
-            int otherAmount = stackedAmounts.getOrDefault(other.getUniqueId(), other.getItemStack().getAmount());
-            baseAmount += otherAmount;
-            minAge = Math.min(minAge, other.getTicksLived());
-
-            clearStackedAmount(other);
-            other.remove();
-        }
-
-        ItemStack newStack = baseStack.clone();
-        newStack.setAmount(1);
-        newStack = tagStackedItem(newStack);
-
-        baseItem.setItemStack(newStack);
-        setStackedAmount(baseItem, baseAmount);
-
-        // Refresh the drop timer to the freshest item so newly dropped items
-        // aren't instantly cut short by an older pile's countdown. setTicksLived
-        // requires >= 1. An idle pile (no new drops) still expires normally.
-        if (dropTimerEnabled) {
-            baseItem.setTicksLived(Math.max(1, minAge));
-        }
-
-        if (mode != HologramMode.HIDDEN) {
-            updateHologram(baseItem);
-        }
-    }
-
-	private boolean canStack(ItemStack a, ItemStack b) {
-        if (a.getType() != b.getType()) return false;
-
-        ItemMeta metaA = a.getItemMeta();
-        ItemMeta metaB = b.getItemMeta();
-
-        if (metaA == null || metaB == null) return false;
-
-        String tagA = metaA.getPersistentDataContainer().get(STACK_KEY, PersistentDataType.STRING);
-        String tagB = metaB.getPersistentDataContainer().get(STACK_KEY, PersistentDataType.STRING);
-
-        if (Objects.equals(tagA, "disable_stack") && Objects.equals(tagB, "disable_stack")) {
-            ItemMeta cloneA = Bukkit.getItemFactory().getItemMeta(a.getType());
-            ItemMeta cloneB = Bukkit.getItemFactory().getItemMeta(b.getType());
-
-            if (cloneA != null) cloneA = metaA.clone();
-            if (cloneB != null) cloneB = metaB.clone();
-
-            if (cloneA != null) {
-                cloneA.getPersistentDataContainer().remove(STACK_KEY);
-            }
-            if (cloneB != null) {
-                cloneB.getPersistentDataContainer().remove(STACK_KEY);
-            }
-
-            return Objects.equals(cloneA, cloneB);
-        }
-
-        return Objects.equals(metaA, metaB);
-    }
-
     private String itemName;
 
 	private void updateHologram(Item item) {
@@ -442,7 +538,10 @@ public class ItemManagement implements Listener {
 				&& !dropTimerWhitelist.contains(item.getItemStack().getType())) {
 			int secs = secondsLeft(item);
 			if (secs <= countdownSeconds) {
-				displayName += " " + ChatColor.GRAY + "(" + secs + "s)";
+				// Reset any trailing colour from the item name so the bold-red
+				// countdown always renders in its own configured style.
+				displayName += " " + ChatColor.RESET
+						+ countdownFormat.replace("{seconds}", String.valueOf(secs));
 			}
 		}
 
@@ -455,6 +554,18 @@ public class ItemManagement implements Listener {
 		int remaining = despawnTicks - item.getTicksLived();
 		if (remaining < 0) remaining = 0;
 		return (remaining + 19) / 20;
+	}
+
+	// True when the item is sitting in water: a full water block, a bubble
+	// column (soul sand pushes items up / magma pulls them down -- the source of
+	// the constant bobbing), or any waterlogged block (slabs, stairs, fences).
+	// These are exactly the drops that oscillate and resist normal stacking.
+	private boolean isSuspendedInWater(Item item) {
+		Block block = item.getLocation().getBlock();
+		Material type = block.getType();
+		if (type == Material.WATER || type == Material.BUBBLE_COLUMN) return true;
+		BlockData data = block.getBlockData();
+		return data instanceof Waterlogged waterlogged && waterlogged.isWaterlogged();
 	}
 
 	private String formatItemName(Material material) {

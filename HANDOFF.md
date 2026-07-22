@@ -34,6 +34,8 @@ sustained lag, misses spikes) — has been **fixed** (see below).
 
 ### Genuinely works (ON)
 - Item stacking (fewer item entities; now persists amounts across restart)
+- Water / bubble-column item stacking (collapses an oscillating column of
+  soul-sand/magma/water items into one stacked entity; merge-only, never kills)
 - World entity **soft-cap** (pauses spawning over the limit; never kills)
 - Random-tick-speed reduction under lag
 - Explosion queue (spreads explosions across ticks; `low_tps_only`)
@@ -42,14 +44,19 @@ sustained lag, misses spikes) — has been **fixed** (see below).
 - Packet-spam protection, chat-spam protection
 - In-game profiler bossbar (`/lesslag profiler`)
 
-### Broken / fake / unimplemented (OFF at the plugin level, cannot run)
+### Broken / fake / unimplemented — now REMOVED (change 16)
+These were previously disabled-in-code but still shipped as dead code + config.
+As of change 16 they are deleted from both the source and `config.yml`:
 - `smart_entity_removal` — deleted the most common entity type across all
-  worlds every 5 min with no TPS check (farm killer). Disabled in code.
-- `mob_ai` freeze — inverted invulnerability + costly per-mob scan. Disabled.
-- `chunk_loading` throttle — fought the engine. Disabled.
-- `web_interface` — static placeholder pages, SSL unimplemented. Ships OFF.
-- `lag_reports`, `task_profiler`, `performance_history` — no code reads these
-  sections at all. Marked `[TODO]` in config, ship OFF.
+  worlds every 5 min with no TPS check (farm killer).
+- `mob_ai` freeze — inverted invulnerability + costly per-mob scan.
+- `chunk_loading` throttle — fought the engine.
+- `web_interface` — static placeholder pages, SSL unimplemented (whole `web/`
+  package, 13 files).
+- `lag_reports`, `task_profiler`, `performance_history` — no code ever read
+  these sections.
+
+Still present (a real, documented quirk, not removed):
 - `disable_redstone.clocks_only` — **fake** toggle; below threshold ALL
   redstone is disabled regardless. Ships `false` to match real behavior.
 
@@ -108,6 +115,152 @@ sustained lag, misses spikes) — has been **fixed** (see below).
      stale name lingers, and each pass prunes tracking-map entries for items
      no longer seen (safe — the count is re-adopted from the entity PDC).
 
+10. **Water / bubble-column item stacking** (`item/ItemManagement.java`, config
+    `item_management.water_stacking`; version bumped 0.0.6 → 0.0.7). Items in a
+    bubble column (soul sand up / magma down) or flowing water get shot up and
+    fall repeatedly, oscillating across many blocks so they sit just outside the
+    normal symmetric `stack_radius` window and never merge — a soul-sand item
+    elevator or a drop chute over water leaves dozens of separate,
+    constantly-moving item entities (move-packet + physics churn = the reported
+    "massive lag"). The per-second item maintenance pass now, per world, counts
+    items suspended in water (`isSuspendedInWater`: WATER / BUBBLE_COLUMN /
+    waterlogged block) and, once that count exceeds `min_items` (default 20),
+    merges those items with a taller **vertical** reach (`vertical_radius`,
+    default 12) while keeping horizontal reach at `stack_radius` — so a whole
+    column collapses into one stacked entity without over-merging a wide area.
+    Reuses the existing stacking/amount bookkeeping, so it **only merges (amounts
+    preserved), never deletes**. Requires `item_stacking.enabled`. Implemented as
+    a 2nd radius argument to `stackNearbyItems`; the old symmetric call still
+    delegates to it. (Scope note: the same paste also mentioned making ender
+    pearls "teleport only / not keep chunks or mobs loaded" — deliberately NOT
+    implemented; controlling chunk tickets / entity ticking needs NMS and a
+    plugin-level version would be a fake toggle, which this project's config
+    culture explicitly forbids.)
+
+11. **Grid-based item merging** (`item/ItemManagement.java`) — the merge no
+    longer does a per-item `getNearbyEntities()` spatial query. On a big drop
+    (TNT blast, mob-farm dump) that was O(N^2): each of N items rescanned all N
+    items in its chunk, so the anti-lag merge became the lag spike on a busy
+    10+ player SMP. Now every item is bucketed once into a spatial cell
+    (`cellKey`, a packed-long grid keyed off `stack_radius`) in a single O(N)
+    pass, then `mergeGroup` collapses each cell. Same amount/tag/timer/hologram
+    bookkeeping as before — still merge-only, never deletes. The water pass
+    (`mergeWaterColumns`) now also runs on survivors only (tall vertical cell =
+    `water_stacking.vertical_radius`), so its cost scales with entities left,
+    not with the raw drop, and never re-introduces the O(N^2) path. This
+    supersedes the old `stackNearbyItems` (removed) and the extra full-scan
+    water pre-count that change 10 originally added.
+
+12. **Merge hardening after a stress-test pass** (`item/ItemManagement.java`).
+    A Bukkit-free model of the exact algorithm (grid bucketing, `cellKey` bit
+    math, merge, water pass) was run over 12 adversarial scenarios, checking
+    amount conservation + cost. It surfaced three real defects, now fixed:
+    - **In-cell O(m^2):** `mergeGroup` did a pairwise `canStack` scan, so a cell
+      full of DISTINCT items (thousands of renamed items dumped in one spot — a
+      grief vector against a lag plugin) cost ~130 ms in one tick. Rewritten to
+      bucket by normalised `ItemStack` (equal key ⇔ stackable) in O(m), then
+      collapse each kind linearly → ~1–2 ms. `canStack` removed (the key
+      equality is exactly equivalent for the tagged, non-null-meta items the
+      maintenance path produces).
+    - **Amount overflow:** a merged stack past ~2.1 B wrapped the 32-bit amount
+      negative (corrupting count/hologram/pickup). Now summed in `long` and
+      clamped to `Integer.MAX_VALUE`.
+    - **Water pass never engaged:** its `min_items` gate is checked on the
+      post-merge survivor count, but the default (20) was higher than the
+      survivor count almost ever is, so the feature did nothing. Default lowered
+      to 4.
+    Confirmed by the same harness: TNT/mergeable clustering is O(N) (5 000 items
+    → 5 000 ops), amount is conserved across all 12 scenarios + a 30-pass
+    stability run, and far-apart / negative / world-border coords never collide.
+    **Known tradeoff (documented, not a bug):** grid merging is per-cell, so
+    mergeable items straddling a cell boundary don't combine in one pass — on a
+    wide static spread the grid leaves ~72 stacks where the old radius scan left
+    ~25. No data is lost (amounts conserved), the count stays bounded (≤ one per
+    cell per kind), and on a live server items drift so boundary pairs
+    eventually share a cell and merge. If perfect completeness is ever wanted,
+    add a phase-2 reconcile over the (few) survivors — cheap now that survivors
+    are few. Still NOT live-tested on a running server (algorithm verified by
+    the harness + compile; the Bukkit glue is unchanged from earlier commits).
+
+13. **Plugin-wide re-audit (every source file re-read).** Two real bugs fixed,
+    plus findings logged:
+    - **`TickSpeedListener` task leak + stuck tick speed** (fixed): the listener
+      never stored/cancelled its scheduler task, so every `/lesslag reload`
+      leaked another task, and reloading/disabling while lagging left
+      `RANDOM_TICK_SPEED` pinned at the reduced value (0 = no crop/tree/ice/fire
+      growth). Now stores the task, and `unregister()` cancels it and restores
+      the tick speed; wired into `PerformanceManager.disable()`.
+    - **`EntityManager` destructive code defaults** (fixed): `kill_excess_entities`
+      and `smart_entity_removal.enabled` defaulted to `true` in code (the value
+      used only when the key is missing), contradicting the shipped `false`.
+      A trimmed/older config could silently enable the farm-killing hard cap.
+      Both now default `false`.
+    - **Hologram throttle/hide verified WORKING**: `hologramModeFor` returns
+      HIDDEN above `hide_above` (400) — `refreshHologram` clears every item's
+      name and adopt/merge skip labelling — and THROTTLED above `throttle_above`
+      (150), which slows only the per-second countdown repaint (static labels
+      still show). Merging still runs in all modes; only the label work is gated.
+    - **Findings NOT changed (lower severity / would add risk):**
+      (a) `ChatListener` runs on the async chat thread and calls
+      `PlayerManager.incrementMessageCount`, which does a non-atomic
+      `totalMessagesPerSecond++` — minor undercount of spam under concurrent
+      chat (never a crash). AtomicInteger would tidy it.
+      (b) PlayerManager registers its packet listener even when packet-spam is
+      disabled (returns early per packet — small constant overhead), and its
+      per-packet increment isn't atomic (minor undercount under load).
+      (c) After a HIDDEN→FULL transition, items that were hidden stay unlabelled
+      until they next merge or enter the despawn countdown (cosmetic).
+      (d) `WebServer` is correctly inert (`WEB_INTERFACE_IMPLEMENTED=false`,
+      never opens a socket); `ChunkManager`/`MobAIListener`/`smartEntityRemoval`
+      confirmed hard-disabled and unregistered.
+
+14. **Reload listener leak fixed** (`LessLag.reloadPlugin`, `system/Profiler`).
+    ItemManagement's pickup listeners and the five directly-registered
+    listeners (PlayerJoin / PlayerTeleport / Chat / SpawnControl /
+    CommandControl) were never unregistered on `/lesslag reload`, so every
+    reload stacked another copy: chat double-counted (muted at half the limit),
+    joins/teleports/summons sent duplicate messages, and old ItemManagement
+    listeners leaked. `reloadPlugin()` now calls `HandlerList.unregisterAll(this)`
+    after disabling and before recreating, so exactly one of each is left.
+    Also `Profiler.disable()` now removes only its own two ProtocolLib packet
+    adapters (it used to strip every plugin packet listener, including the
+    packet-spam protection — previously masked by reload order). The
+    per-manager task/state cleanup verified reload-safe: WorldManager,
+    EntityManager, PlayerManager, PerformanceManager (incl. TickSpeed restore),
+    ExplosionQueue, Profiler all cancel their own tasks and re-init cleanly.
+
+15. **Main-thread disk I/O removed** (`system/WorldInfo`, `world/WorldManager`).
+    `/lesslag worlds` and world auto-unload recursively walked the whole world
+    folder (potentially thousands of region files, multiple GB) on the main
+    thread just to print "Size: X MB" — a self-inflicted stall on a big SMP.
+    The folder-size walk now runs via `runTaskAsynchronously`, with the
+    resulting messages sent back on the main thread. The Bukkit-API stats
+    (entities/chunks/players) are still snapshotted on the main thread first.
+    Full re-audit of every source file is now complete; remaining items are the
+    documented low-severity cosmetics only.
+
+16. **Dead features deleted (code + config).** The features that were only ever
+    disabled-in-code are now fully removed, so nothing dead ships in the jar:
+    - Deleted files: the whole `web/` package (13 files: WebServer, the four
+      handlers, four pages, HttpResponse, RouteHandler, AccessTokenManager,
+      WebSessionManager), `performance/MobAIListener.java`,
+      `chunk/ChunkManager.java`.
+    - Deleted code: `EntityManager.smartEntityRemoval()` + its fields/imports;
+      the MobAI wiring and `mob_ai` config reads in `PerformanceManager`; the
+      `webServer`/`chunkManager` fields, wiring, and `getWebServer()` in
+      `LessLag`; the `/lesslag web` subcommand + `handleWebCommand`/`capitalize`
+      in `MainCommand`.
+    - Deleted config: `smart_entity_removal`, `mob_ai`, `chunk_loading`,
+      `web_interface`, `lag_reports`, `task_profiler`, `performance_history`;
+      the `[OFF]`/`[TODO]` legend entries (nothing uses them now).
+    - Verified: `mvn clean package` BUILD SUCCESS; `unzip -l` on the jar shows
+      no `web/`/`MobAI`/`ChunkManager` classes; config.yml is valid YAML with
+      only the 8 real top-level sections; no source reference to any removed
+      symbol remains (grep clean). `/lesslag` commands are now
+      `reload|info|profiler|worlds`. The in-game profiler bossbar is untouched
+      (it was never part of the web interface). ProtocolLib is still required
+      (profiler packet counting + packet-spam protection use it).
+
 ## Re-audit status (all changes verified)
 - `mvn -o clean compile` / `package -DskipTests` → BUILD SUCCESS (only a
   pre-existing `NamespacedKey` deprecation warning).
@@ -119,15 +272,12 @@ sustained lag, misses spikes) — has been **fixed** (see below).
 - config.yml validated as well-formed YAML.
 
 ## Known issues NOT yet fixed (optional future work)
-- **Item-stacking spatial pass** (`ItemManagement` maintenance task) is the one
-  remaining O(N) cost: `getNearbyEntities()` per item entity once per second.
-  It self-limits in practice (stacking collapses items into few entities, and
-  the drop timer now caps how long items live), but a pathological farm (many
-  non-mergeable, spread-out item types) could still make N large. Clean fix if
-  needed: spread the pass across ticks with a per-tick budget + round-robin
-  cursor. Left undone deliberately — the amount/hologram/timer bookkeeping is
-  easy to break and needs an in-game verify. Note the hologram cost of that
-  scenario is already handled (throttle/hide above configurable item counts).
+- **Item-stacking spatial pass** — FIXED (change 11 below). The pass no longer
+  calls `getNearbyEntities()` per item; it grid-buckets all items in one O(N)
+  pass and merges within each cell, so a big TNT/mob-farm drop no longer makes
+  the merge itself an O(N^2) spike. A per-tick budget + round-robin cursor is no
+  longer needed for this; only revisit if `getEntitiesByClass` itself (the
+  unavoidable O(N) entity fetch) ever shows up in a profile.
 - No changes have been **live-tested on a running server** — verified by
   compile + inspection + static analysis only. Worth an in-game check of:
   stacked-item count surviving `/reload` + restart; a simulated spike tripping

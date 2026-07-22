@@ -1,7 +1,6 @@
 package tk.bridgersilk.lesslag.performance;
 
 import org.bukkit.configuration.file.FileConfiguration;
-import org.bukkit.scheduler.BukkitTask;
 
 import tk.bridgersilk.lesslag.LessLag;
 
@@ -28,12 +27,18 @@ public class PerformanceManager {
 	private boolean commandBlocksEnabled;
 	private double commandBlocksTpsThreshold;
 
-	private boolean mobAiDisableWhenNoPlayers;
-	private int mobAiRadius;
-
 	private boolean decreaseTickSpeed;
 	private double tickSpeedThreshold;
 	private int decreaseTickSpeedTo;
+
+	private boolean villagerOptEnabled;
+	private int villagerCheckInterval;
+	private int villagerCollisionThreshold;
+	private boolean villagerThrottleAiEnabled;
+	private int villagerThrottleAiRadius;
+	private int villagerThrottlePeriodTicks;
+	private int villagerThrottleEfficiencyPercent;
+	private int villagerMaxPerChunk;
 
 	private RedstoneListener redstoneListener;
 	private FallingBlockListener fallingBlockListener;
@@ -41,10 +46,8 @@ public class PerformanceManager {
 	private ExplosionListener explosionListener;
 	private EnderPearlListener enderPearlListener;
 	private CommandBlockListener commandBlockListener;
-	private MobAIListener mobAIListener;
 	private TickSpeedListener tickSpeedListener;
-
-	private BukkitTask aiCheckTask;
+	private VillagerOptimizer villagerOptimizer;
 
 	public PerformanceManager(LessLag plugin) {
 		this.plugin = plugin;
@@ -110,14 +113,6 @@ public class PerformanceManager {
 			"performance_controls.disable_command_blocks.disable_below_tps"
 		);
 
-		mobAiDisableWhenNoPlayers = config.getBoolean(
-			"mob_ai.disable_ai_when_no_players_nearby.enabled"
-		);
-
-		mobAiRadius = config.getInt(
-			"mob_ai.disable_ai_when_no_players_nearby.radius"
-		);
-
 		decreaseTickSpeed = config.getBoolean(
 			"performance_controls.decrease_tickspeed.enabled"
 		);
@@ -128,6 +123,38 @@ public class PerformanceManager {
 
 		tickSpeedThreshold = config.getDouble(
 			"performance_controls.decrease_tickspeed.decrease_below_tps"
+		);
+
+		villagerOptEnabled = config.getBoolean(
+			"villager_optimization.enabled"
+		);
+
+		villagerCheckInterval = config.getInt(
+			"villager_optimization.check_interval_ticks", 100
+		);
+
+		villagerCollisionThreshold = config.getInt(
+			"villager_optimization.disable_collision_above_per_chunk", 6
+		);
+
+		villagerThrottleAiEnabled = config.getBoolean(
+			"villager_optimization.throttle_ai_when_no_players_nearby.enabled"
+		);
+
+		villagerThrottleAiRadius = config.getInt(
+			"villager_optimization.throttle_ai_when_no_players_nearby.radius", 24
+		);
+
+		villagerThrottlePeriodTicks = config.getInt(
+			"villager_optimization.throttle_ai_when_no_players_nearby.cycle_ticks", 20
+		);
+
+		villagerThrottleEfficiencyPercent = config.getInt(
+			"villager_optimization.throttle_ai_when_no_players_nearby.efficiency_percent", 30
+		);
+
+		villagerMaxPerChunk = config.getInt(
+			"villager_optimization.max_per_chunk", 20
 		);
 	}
 
@@ -175,17 +202,6 @@ public class PerformanceManager {
 			);
 		}
 
-		// mob_ai (disable_ai_when_no_players_nearby) is DISABLED at the
-		// plugin level: its invulnerability logic was inverted and its
-		// per-mob proximity scan added more tick cost than it saved.
-		// Intentionally not registered regardless of config.
-		if (false && mobAiDisableWhenNoPlayers) {
-			mobAIListener = new MobAIListener(
-				plugin,
-				mobAiRadius
-			);
-		}
-
 		if (decreaseTickSpeed) {
 			tickSpeedListener = new TickSpeedListener(
 				plugin,
@@ -193,6 +209,24 @@ public class PerformanceManager {
 				tickSpeedThreshold
 			);
 		}
+
+		if (villagerOptEnabled) {
+			villagerOptimizer = new VillagerOptimizer(
+				plugin,
+				villagerCheckInterval,
+				villagerCollisionThreshold,
+				villagerThrottleAiEnabled,
+				villagerThrottleAiRadius,
+				villagerThrottlePeriodTicks,
+				villagerThrottleEfficiencyPercent,
+				villagerMaxPerChunk
+			);
+		}
+	}
+
+	/** The live villager optimizer, or null if disabled in config. */
+	public VillagerOptimizer getVillagerOptimizer() {
+		return villagerOptimizer;
 	}
 
 	public void disable() {
@@ -226,14 +260,17 @@ public class PerformanceManager {
 			commandBlockListener = null;
 		}
 
-		if (mobAIListener != null) {
-			mobAIListener.unregister();
-			mobAIListener = null;
+		// Cancels the tick-speed task AND restores any random-tick-speed it
+		// lowered. Previously this listener was never stopped, so /lesslag
+		// reload leaked its task and could leave RANDOM_TICK_SPEED stuck low.
+		if (tickSpeedListener != null) {
+			tickSpeedListener.unregister();
+			tickSpeedListener = null;
 		}
 
-		if (aiCheckTask != null) {
-			aiCheckTask.cancel();
-			aiCheckTask = null;
+		if (villagerOptimizer != null) {
+			villagerOptimizer.unregister();
+			villagerOptimizer = null;
 		}
 	}
 }

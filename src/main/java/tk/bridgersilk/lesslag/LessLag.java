@@ -8,9 +8,9 @@ import org.bukkit.plugin.java.JavaPlugin;
 import com.comphenix.protocol.ProtocolLibrary;
 import com.comphenix.protocol.ProtocolManager;
 
-import tk.bridgersilk.lesslag.chunk.ChunkManager;
 import tk.bridgersilk.lesslag.entity.CommandControlListener;
 import tk.bridgersilk.lesslag.entity.EntityManager;
+import tk.bridgersilk.lesslag.entity.BreedingCapListener;
 import tk.bridgersilk.lesslag.entity.SpawnControlListener;
 import tk.bridgersilk.lesslag.item.ItemManagement;
 import tk.bridgersilk.lesslag.performance.PerformanceManager;
@@ -23,7 +23,6 @@ import tk.bridgersilk.lesslag.player.PlayerTeleportListener;
 import tk.bridgersilk.lesslag.system.ConfigManager;
 import tk.bridgersilk.lesslag.system.MainCommand;
 import tk.bridgersilk.lesslag.system.Profiler;
-import tk.bridgersilk.lesslag.web.WebServer;
 import tk.bridgersilk.lesslag.world.WorldManager;
 
 public class LessLag extends JavaPlugin {
@@ -35,8 +34,6 @@ public class LessLag extends JavaPlugin {
 	private EntityManager entityManager;
 	private PlayerManager playerManager;
 	private PerformanceManager performanceManager;
-	private ChunkManager chunkManager;
-	private WebServer webServer;
 
 	private ExplosionQueueManager explosionQueueManager;
 	private ExplosionQueueListener explosionQueueListener;
@@ -69,10 +66,13 @@ public class LessLag extends JavaPlugin {
 
 		enableExplosionQueue();
 
-		chunkManager = new ChunkManager(this);
-
 		Bukkit.getPluginManager().registerEvents(
 			new SpawnControlListener(entityManager),
+			this
+		);
+
+		Bukkit.getPluginManager().registerEvents(
+			new BreedingCapListener(entityManager),
 			this
 		);
 
@@ -98,9 +98,6 @@ public class LessLag extends JavaPlugin {
 			this
 		);
 
-		webServer = new WebServer(this);
-		webServer.start();
-
 		getLogger().info(
 			"LessLag enabled! Config loaded and Profiler initialized."
 		);
@@ -109,11 +106,6 @@ public class LessLag extends JavaPlugin {
 	@Override
 	public void onDisable() {
 		disableExplosionQueue();
-
-		if (webServer != null) {
-			webServer.stop();
-			webServer = null;
-		}
 
 		if (worldManager != null) {
 			worldManager.disable();
@@ -140,11 +132,6 @@ public class LessLag extends JavaPlugin {
 			playerManager = null;
 		}
 
-		if (chunkManager != null) {
-			chunkManager.disable();
-			chunkManager = null;
-		}
-
 		getLogger().info("LessLag disabled!");
 	}
 
@@ -152,12 +139,16 @@ public class LessLag extends JavaPlugin {
 		return configManager;
 	}
 
-	public WebServer getWebServer() {
-		return webServer;
-	}
-
 	public Profiler getProfiler() {
 		return profiler;
+	}
+
+	public PerformanceManager getPerformanceManager() {
+		return performanceManager;
+	}
+
+	public EntityManager getEntityManager() {
+		return entityManager;
 	}
 
 	public ExplosionQueueManager getExplosionQueueManager() {
@@ -231,16 +222,8 @@ public class LessLag extends JavaPlugin {
 			playerManager.disable();
 		}
 
-		if (chunkManager != null) {
-			chunkManager.disable();
-		}
-
 		if (performanceManager != null) {
 			performanceManager.disable();
-		}
-
-		if (webServer != null) {
-			webServer.stop();
 		}
 
 		/*
@@ -251,6 +234,17 @@ public class LessLag extends JavaPlugin {
 		configManager.reloadConfig();
 
 		/*
+		 * Clear every listener this plugin registered before rebuilding.
+		 * Several listeners (PlayerJoin/PlayerTeleport/Chat/SpawnControl/
+		 * CommandControl/BreedingCap) are registered as inline instances with
+		 * no field reference, so nothing else can unregister them -- without
+		 * this, each reload would stack a fresh copy on top of the old ones and
+		 * fire their handlers twice (then three times, ...). Managers recreated
+		 * below re-register their own listeners fresh.
+		 */
+		HandlerList.unregisterAll(this);
+
+		/*
 		 * Recreate all managers using the new configuration.
 		 */
 		profiler = new Profiler(this);
@@ -259,7 +253,6 @@ public class LessLag extends JavaPlugin {
 		entityManager = new EntityManager(this);
 		playerManager = new PlayerManager(this);
 		performanceManager = new PerformanceManager(this);
-		chunkManager = new ChunkManager(this);
 
 		enableExplosionQueue();
 
@@ -284,12 +277,14 @@ public class LessLag extends JavaPlugin {
 		);
 
 		Bukkit.getPluginManager().registerEvents(
-			new CommandControlListener(entityManager),
+			new BreedingCapListener(entityManager),
 			this
 		);
 
-		webServer = new WebServer(this);
-		webServer.start();
+		Bukkit.getPluginManager().registerEvents(
+			new CommandControlListener(entityManager),
+			this
+		);
 
 		getLogger().info(
 			"Plugin reloaded. Features updated with the latest config."
