@@ -2,14 +2,15 @@
 
 > Purpose: let a fresh Claude Code session (or a new contributor) pick up
 > where the last one left off without re-explaining everything.
-> Working branch: `claude/plugin-performance-audit-560zph`
+> State: everything through change 17 is merged into `main` (PR #7). Start new
+> work from the latest `main` on a fresh feature branch.
 
 ## What this project is
 LessLag is a Minecraft **Paper/Spigot** anti-lag plugin (Java 17, Maven,
-hard-depends on ProtocolLib). Current version `0.0.6`.
+hard-depends on ProtocolLib). Current version `0.0.7`.
 
 ## Build / CI
-- Local: `mvn -B clean package` produces `target/lesslag-0.0.6.jar` (shaded).
+- Local: `mvn -B clean package` produces `target/lesslag-0.0.7.jar` (shaded).
   Building in-sandbox now works (Paper/ProtocolLib deps resolve); only the
   offline `surefire` test plugin is missing, so use `-DskipTests` offline.
   `PluginTest` is a trivial `assertTrue(true)` and passes in CI.
@@ -37,6 +38,13 @@ sustained lag, misses spikes) — has been **fixed** (see below).
 - Water / bubble-column item stacking (collapses an oscillating column of
   soul-sand/magma/water items into one stacked entity; merge-only, never kills)
 - World entity **soft-cap** (pauses spawning over the limit; never kills)
+- **Villager optimizer** (`villager_optimization`): collision-off in packed
+  chunks, phase-staggered AI throttle when no player is near, per-chunk breeding
+  soft-cap; one timer pass, cost independent of villager count. `/lesslag
+  villagers` shows live stats.
+- **Global breedable caps** (`entity_management.breedable_global_limits`):
+  server-wide per-type population caps for farm mobs; pauses breeding/egg-hatch
+  over the cap, never kills.
 - Random-tick-speed reduction under lag
 - Explosion queue (spreads explosions across ticks; `low_tps_only`)
 - Emergency event-cancels: redstone / fluids / falling-blocks / explosions
@@ -261,6 +269,25 @@ Still present (a real, documented quirk, not removed):
       (it was never part of the web interface). ProtocolLib is still required
       (profiler packet counting + packet-spam protection use it).
 
+17. **Merged everything to `main` + integrated the villager optimizer.** All of
+    the above (changes 1-16) plus the `server-mobfarm-perf-h5` villager branch
+    were merged into `main` via PR #7. That branch had forked before an earlier
+    merge and edited the same core files, so the merge had conflicts in
+    `EntityManager`, `PerformanceManager`, `MainCommand`, `config.yml`, and
+    `LessLag` — all resolved to **keep both** feature sets:
+    - Kept (theirs): `VillagerOptimizer`, `BreedingCapListener`,
+      `villager_optimization` + `entity_management.breedable_global_limits`
+      config, `/lesslag villagers` command.
+    - Kept (mine): the O(N)/O(m) item merge, all audit fixes, and the removal of
+      the dead features (`smart_entity_removal` / `mob_ai` / `chunk_loading` /
+      web interface stayed removed — their conflicting re-additions were
+      dropped). `killExcessEntities` default stays `false`.
+    - Deduped the two reload-listener sweeps into one `HandlerList.unregisterAll`.
+    CI (`build`) was green and the PR merged clean into `main`.
+    **Process going forward:** `main` is the stable, integrated base; new work
+    branches off the latest `main`, one feature per branch → PR → merge, to
+    avoid the long-lived-branch divergence that caused this merge's conflicts.
+
 ## Re-audit status (all changes verified)
 - `mvn -o clean compile` / `package -DskipTests` → BUILD SUCCESS (only a
   pre-existing `NamespacedKey` deprecation warning).
@@ -284,6 +311,12 @@ Still present (a real, documented quirk, not removed):
   the reactive gates; `/lesslag reload` not killing other features.
 
 ## Where we stopped
-All four requested deliverables are done (handoff, CI artifact workflow,
-improved config, re-audit). Next natural step is the in-game verification pass
-above, and/or the budgeted item-stacking rewrite.
+Everything (item-merge optimization, full plugin audit, dead-feature removal,
+and the integrated villager optimizer) is merged into `main` (PR #7, version
+`0.0.7`); CI is green. The one thing still outstanding for ALL of it is an
+**in-game verification pass on a running server** — none of these changes have
+been live-tested. Worth checking: stacked-item counts surviving `/lesslag
+reload` + restart; `/lesslag reload` run several times not muting chat early or
+leaving `RANDOM_TICK_SPEED` stuck; `/lesslag worlds` not freezing on a large
+world; a big TNT drop collapsing without a tick spike; and the villager
+collision/AI-throttle/breeding-cap levers behaving in a packed hall.
