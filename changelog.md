@@ -1,3 +1,6 @@
+## v0.0.9
+- fixed: item pickup skipping items that could partly fit. In `"full"` pickup mode a stacked ground item was skipped entirely whenever it couldn't ALL fit, unless the inventory already held a partial stack of the same item — the fallback only topped off existing same-item stacks and never used empty slots. So with, say, a full 64 dirt stack, a partial diamond stack and some free slots, walking over 100+ dirt and 29 diamond on the ground picked up the diamond but left the dirt behind, even though free slots could hold some of it. Pickup now always takes as much as fits — topping off same-item stacks AND filling empty slots — and leaves only the genuine overflow on the ground (with its count decremented). Applies to both player pickups and hopper/container pickups. Different items on the ground are still validated independently: an item with no room is left where it is and never disturbs unrelated stacks.
+
 ## v0.0.1
 - first release
 

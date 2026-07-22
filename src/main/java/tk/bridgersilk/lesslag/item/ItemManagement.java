@@ -610,37 +610,21 @@ public class ItemManagement implements Listener {
         return leftovers;
     }
 
-    // Tops off existing, non-full stacks of the SAME item without ever
-    // occupying an empty slot -- exactly what vanilla still does when the
-    // inventory is otherwise full but holds a partial stack of that item.
-    // "full" pickup mode is all-or-nothing for taking the WHOLE ground stack,
-    // but a full inventory that can still absorb some of the same item into a
-    // partial stack should not have the pickup rejected outright. Returns how
-    // many items were absorbed (0 if there was no room in any partial stack).
-    private int topOffPartialStacks(Inventory inv, ItemStack cleaned, int total) {
-        ItemStack[] contents = inv.getStorageContents();
-        int remaining = total;
-
-        for (int i = 0; i < contents.length && remaining > 0; i++) {
-            ItemStack current = contents[i];
-            if (current == null || current.getType() == Material.AIR) continue;
-            if (!current.isSimilar(cleaned)) continue;
-
-            int space = current.getMaxStackSize() - current.getAmount();
-            if (space <= 0) continue;
-
-            int add = Math.min(space, remaining);
-            current.setAmount(current.getAmount() + add);
-            remaining -= add;
-        }
-
-        int absorbed = total - remaining;
-        if (absorbed > 0) {
-            // Write the mutated slots back; getStorageContents() may hand back
-            // copies rather than live references depending on the inventory.
-            inv.setStorageContents(contents);
-        }
-        return absorbed;
+    // Picks up as much of the ground stack as physically fits into the
+    // inventory: it tops off existing partial stacks of the SAME item AND fills
+    // empty slots, exactly like vanilla. Only what fits is taken; whatever does
+    // not fit stays on the ground. Returns how many items were actually
+    // absorbed (0 if the item can't go anywhere).
+    //
+    // addItem naturally does same-item validation: it only ever merges into
+    // slots holding an isSimilar() item (or empty ones), so a different item on
+    // the ground never disturbs unrelated stacks -- it simply finds no room and
+    // is left behind. It also handles a requested amount larger than one max
+    // stack, splitting it across as many slots as fit.
+    private int pickUpWhatFits(Inventory inv, ItemStack cleaned, int total) {
+        HashMap<Integer, ItemStack> leftovers = inv.addItem(createItemWithAmount(cleaned, total));
+        int notFitted = leftovers.values().stream().mapToInt(ItemStack::getAmount).sum();
+        return total - notFitted;
     }
 
     @EventHandler
@@ -661,12 +645,11 @@ public class ItemManagement implements Listener {
         }
 
         if (pickupBehavior.equals("partial")) {
-            HashMap<Integer, ItemStack> leftovers = inv.addItem(createItemWithAmount(cleanedItem, totalAmount));
-            int pickedUp = totalAmount - leftovers.values().stream().mapToInt(ItemStack::getAmount).sum();
+            int pickedUp = pickUpWhatFits(inv, cleanedItem, totalAmount);
 
             if (pickedUp >= totalAmount) {
                 despawnItem(item);
-            } else {
+            } else if (pickedUp > 0) {
                 setStackedAmount(item, totalAmount - pickedUp);
                 updateHologram(item);
             }
@@ -675,17 +658,21 @@ public class ItemManagement implements Listener {
             HashMap<Integer, ItemStack> simulatedLeftovers = simulateAddItem(inv, testStack);
 
             if (simulatedLeftovers.isEmpty()) {
+                // Whole stack fits -> take it all in one go.
                 inv.addItem(testStack);
                 despawnItem(item);
             } else {
-                // The whole stack won't fit, but a full inventory can still have
-                // room in a partial stack of the same item -- top that off
-                // instead of rejecting the pickup entirely (vanilla behaviour).
-                int toppedOff = topOffPartialStacks(inv, cleanedItem, totalAmount);
-                if (toppedOff >= totalAmount) {
+                // The whole stack won't fit, so pick up as much as DOES fit --
+                // top off same-item stacks AND fill empty slots -- and leave the
+                // remainder on the ground. Previously this only topped off
+                // existing same-item partial stacks and ignored empty slots, so
+                // an item that could partially fit a free slot was skipped
+                // outright.
+                int pickedUp = pickUpWhatFits(inv, cleanedItem, totalAmount);
+                if (pickedUp >= totalAmount) {
                     despawnItem(item);
-                } else if (toppedOff > 0) {
-                    setStackedAmount(item, totalAmount - toppedOff);
+                } else if (pickedUp > 0) {
+                    setStackedAmount(item, totalAmount - pickedUp);
                     updateHologram(item);
                 }
             }
@@ -713,8 +700,7 @@ public class ItemManagement implements Listener {
         }
 
         if (pickupBehavior.equals("partial")) {
-            HashMap<Integer, ItemStack> leftovers = player.getInventory().addItem(createItemWithAmount(cleanedItem, totalAmount));
-            int pickedUp = totalAmount - leftovers.values().stream().mapToInt(ItemStack::getAmount).sum();
+            int pickedUp = pickUpWhatFits(player.getInventory(), cleanedItem, totalAmount);
 
             if (pickedUp > 0) {
                 // The vanilla pickup event is cancelled below, which
@@ -725,7 +711,7 @@ public class ItemManagement implements Listener {
 
             if (pickedUp >= totalAmount) {
                 despawnItem(item);
-            } else {
+            } else if (pickedUp > 0) {
                 setStackedAmount(item, totalAmount - pickedUp);
                 updateHologram(item);
             }
@@ -734,20 +720,24 @@ public class ItemManagement implements Listener {
             HashMap<Integer, ItemStack> simulatedLeftovers = simulateAddItem(player.getInventory(), testStack);
 
             if (simulatedLeftovers.isEmpty()) {
+                // Whole stack fits -> take it all in one go.
                 player.getInventory().addItem(testStack);
                 playPickupSound(player);
                 despawnItem(item);
             } else {
-                // The whole stack won't fit, but a full inventory can still have
-                // room in a partial stack of the same item -- top that off
-                // instead of rejecting the pickup entirely (vanilla behaviour).
-                int toppedOff = topOffPartialStacks(player.getInventory(), cleanedItem, totalAmount);
-                if (toppedOff > 0) {
+                // The whole stack won't fit, so pick up as much as DOES fit --
+                // top off same-item stacks AND fill empty slots -- and leave the
+                // remainder on the ground. Previously this only topped off
+                // existing same-item partial stacks and ignored empty slots, so
+                // an item that could partially fit a free slot was skipped
+                // outright.
+                int pickedUp = pickUpWhatFits(player.getInventory(), cleanedItem, totalAmount);
+                if (pickedUp > 0) {
                     playPickupSound(player);
-                    if (toppedOff >= totalAmount) {
+                    if (pickedUp >= totalAmount) {
                         despawnItem(item);
                     } else {
-                        setStackedAmount(item, totalAmount - toppedOff);
+                        setStackedAmount(item, totalAmount - pickedUp);
                         updateHologram(item);
                     }
                 }
