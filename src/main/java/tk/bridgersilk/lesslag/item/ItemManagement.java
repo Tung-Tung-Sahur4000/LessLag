@@ -590,6 +590,52 @@ public class ItemManagement implements Listener {
         return -1;
     }
 
+    // Produces a clean, vanilla-stacking copy of a tagged ground item to hand
+    // to a player/inventory. We tag every stacked ground item with STACK_KEY (to
+    // stop vanilla from auto-merging the item ENTITIES and corrupting our own
+    // amount tracking) and strip it here on pickup. The catch: on Minecraft
+    // 1.20.5+ (the data-component era) removing our last PDC key can leave an
+    // empty `custom_data` component behind, and such a stack fails isSimilar()
+    // against a genuinely vanilla stack of the same item. With an EMPTY slot
+    // that doesn't matter (addItem just uses the free slot), but in a FULL
+    // inventory addItem must top off a matching stack -- which needs
+    // isSimilar() -- so the pickup silently does nothing ("full inventory
+    // skips", while the same item picks up fine when a slot is free). Fix: when
+    // nothing but empty metadata is left after untagging, hand over a pristine
+    // vanilla stack so it stacks normally. Items that still carry real meta
+    // (names/enchants/potion data/...) are returned untouched -- and those are
+    // unstackable anyway, so they always need a free slot regardless.
+    private ItemStack cleanForPickup(ItemStack tagged) {
+        ItemStack cleaned = tagged.clone();
+
+        ItemMeta meta = cleaned.getItemMeta();
+        if (meta != null) {
+            meta.getPersistentDataContainer().remove(STACK_KEY);
+            cleaned.setItemMeta(meta);
+        }
+
+        // Already indistinguishable from a vanilla stack -> nothing to fix.
+        ItemStack vanilla = new ItemStack(cleaned.getType());
+        if (cleaned.isSimilar(vanilla)) {
+            return cleaned;
+        }
+
+        // Different from vanilla. If the only difference is leftover empty
+        // metadata (the untagged meta equals a fresh default meta for this
+        // type), use the pristine stack; otherwise the item has real meta worth
+        // preserving, so keep it as-is.
+        ItemMeta cleanedMeta = cleaned.getItemMeta();
+        ItemMeta freshMeta = Bukkit.getItemFactory().getItemMeta(cleaned.getType());
+        if (cleanedMeta == null || Bukkit.getItemFactory().equals(cleanedMeta, freshMeta)) {
+            if (debugPickup) {
+                plugin.getLogger().info("[pickup] rebuilt " + cleaned.getType()
+                        + " to a vanilla stack (stripped empty residual component)");
+            }
+            return vanilla;
+        }
+        return cleaned;
+    }
+
     // Picks up a stacked ground item into `inv`, taking as much as physically
     // fits and leaving the rest on the ground. addItem does exactly the vanilla
     // thing: it tops off existing partial stacks of the SAME item first, then
@@ -601,12 +647,7 @@ public class ItemManagement implements Listener {
     //
     // Returns how many items were actually picked up (0 if there was no room).
     private int pickUpStacked(Item item, Inventory inv, int totalAmount) {
-        ItemStack cleanedItem = item.getItemStack().clone();
-        ItemMeta meta = cleanedItem.getItemMeta();
-        if (meta != null) {
-            meta.getPersistentDataContainer().remove(STACK_KEY);
-            cleanedItem.setItemMeta(meta);
-        }
+        ItemStack cleanedItem = cleanForPickup(item.getItemStack());
 
         // Guard against a corrupt/empty ground stack: addItem silently ignores
         // AIR (reporting no leftovers), which would otherwise despawn the item
