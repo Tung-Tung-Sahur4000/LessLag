@@ -710,8 +710,14 @@ public class ItemManagement implements Listener {
         int totalAmount = resolveStackedAmount(item);
         if (totalAmount < 0) return; // not a stacked item -> let vanilla handle it
 
-        pickUpStacked(item, event.getInventory(), totalAmount);
+        // Cancel BEFORE moving any items. We've decided to hand out the real
+        // (tracked) amount ourselves, so vanilla must not also pick up the
+        // entity -- otherwise it would grab the visible-1 stack and destroy the
+        // rest of the pile. Cancelling first means that even if the manual
+        // pickup below fails, the worst case is "nothing picked up, ground stack
+        // untouched" -- never a duplicate and never a partial loss.
         event.setCancelled(true);
+        pickUpStacked(item, event.getInventory(), totalAmount);
     }
 
 	@EventHandler
@@ -722,15 +728,17 @@ public class ItemManagement implements Listener {
         int totalAmount = resolveStackedAmount(item);
         if (totalAmount < 0) return; // not a stacked item -> let vanilla handle it
 
+        // Cancel BEFORE moving any items (see onInventoryItemPickup): guarantees
+        // vanilla can never also pick up the entity, so no duplicate / partial
+        // loss even if the manual pickup below were to fail.
+        event.setCancelled(true);
+
         int pickedUp = pickUpStacked(item, player.getInventory(), totalAmount);
         if (pickedUp > 0) {
-            // The vanilla pickup event is cancelled below, which suppresses the
-            // normal "pop" sound. Replay it manually so stacked pickups aren't
-            // silent.
+            // Cancelling suppresses the normal "pop" sound; replay it so stacked
+            // pickups aren't silent.
             playPickupSound(player);
         }
-
-        event.setCancelled(true);
     }
 
     // Reproduces the vanilla item-pickup sound. Needed because stacked
