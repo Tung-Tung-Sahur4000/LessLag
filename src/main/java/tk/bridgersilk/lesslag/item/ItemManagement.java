@@ -26,6 +26,7 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryPickupItemEvent;
 import org.bukkit.event.entity.EntityPickupItemEvent;
+import org.bukkit.event.entity.ItemMergeEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
@@ -327,11 +328,7 @@ public class ItemManagement implements Listener {
             // wrap negative and corrupt the count / hologram / pickup.
             int amount = (int) Math.min(total, Integer.MAX_VALUE);
 
-            ItemStack newStack = base.getItemStack().clone();
-            newStack.setAmount(1);
-            newStack = tagStackedItem(newStack);
-
-            base.setItemStack(newStack);
+            base.setItemStack(displayStack(base.getItemStack()));
             setStackedAmount(base, amount);
 
             // Refresh the drop timer to the freshest item so newly dropped items
@@ -376,24 +373,26 @@ public class ItemManagement implements Listener {
     }
 
     // First time we see an item: recover its persisted count after a
-    // restart/reload, or tag it and record its amount if it is brand new.
+    // restart/reload, or record its amount if it is brand new.
     private void adoptItem(Item item, HologramMode mode) {
         Integer persisted = item.getPersistentDataContainer()
                 .get(AMOUNT_KEY, PersistentDataType.INTEGER);
 
         if (persisted != null) {
-            // Recovered after a restart/reload: the entity is already tagged
-            // and its ItemStack already holds a single item, so just restore
-            // the real count.
+            // Recovered after a restart/reload: its ItemStack already holds a
+            // single item, so just restore the real count. Also migrate any
+            // item saved with the old lesslag tag to a normal stack, so it can
+            // be picked up into a full inventory (the tag broke that).
             stackedAmounts.put(item.getUniqueId(), persisted);
+
+            ItemStack current = item.getItemStack();
+            ItemStack normalised = displayStack(current);
+            if (current.getAmount() != 1 || !normalised.isSimilar(current)) {
+                item.setItemStack(normalised);
+            }
         } else {
             int totalAmount = item.getItemStack().getAmount();
-
-            ItemStack newStack = item.getItemStack().clone();
-            newStack.setAmount(1);
-            newStack = tagStackedItem(newStack);
-
-            item.setItemStack(newStack);
+            item.setItemStack(displayStack(item.getItemStack()));
             setStackedAmount(item, totalAmount);
         }
 
@@ -490,14 +489,29 @@ public class ItemManagement implements Listener {
         item.remove();
     }
 
-    private ItemStack tagStackedItem(ItemStack stack) {
-        ItemStack tagged = stack.clone();
-        ItemMeta meta = tagged.getItemMeta();
+    // The single-item ItemStack shown on the ground for a stacked entity: the
+    // real item at amount 1, as a NORMAL vanilla-looking stack (no lesslag tag).
+    //
+    // We deliberately do NOT tag it. A PDC tag made the ground item fail
+    // vanilla's inventory-fit check (isSimilar), so vanilla decided a full
+    // inventory had "no room" and never fired the pickup event at all -- stacked
+    // items simply could not be picked up into a full inventory even onto a
+    // matching stack (fresh, untagged drops worked; anything the stacker had
+    // touched did not). Vanilla ENTITY merging (which the tag used to prevent)
+    // is now stopped in onItemMerge instead, so the on-ground stack stays a
+    // normal item and picks up exactly like vanilla.
+    //
+    // Legacy items saved with the old tag are migrated through cleanForPickup,
+    // which strips the tag (and any empty residual component) so they too become
+    // normal, pickup-able stacks.
+    private ItemStack displayStack(ItemStack source) {
+        ItemMeta meta = source.getItemMeta();
+        boolean legacyTagged = meta != null
+                && meta.getPersistentDataContainer().has(STACK_KEY, PersistentDataType.STRING);
 
-        meta.getPersistentDataContainer().set(STACK_KEY, PersistentDataType.STRING, "disable_stack");
-
-        tagged.setItemMeta(meta);
-        return tagged;
+        ItemStack single = legacyTagged ? cleanForPickup(source) : source.clone();
+        single.setAmount(1);
+        return single;
     }
 
     private String itemName;
@@ -590,21 +604,15 @@ public class ItemManagement implements Listener {
         return -1;
     }
 
-    // Produces a clean, vanilla-stacking copy of a tagged ground item to hand
-    // to a player/inventory. We tag every stacked ground item with STACK_KEY (to
-    // stop vanilla from auto-merging the item ENTITIES and corrupting our own
-    // amount tracking) and strip it here on pickup. The catch: on Minecraft
-    // 1.20.5+ (the data-component era) removing our last PDC key can leave an
-    // empty `custom_data` component behind, and such a stack fails isSimilar()
-    // against a genuinely vanilla stack of the same item. With an EMPTY slot
-    // that doesn't matter (addItem just uses the free slot), but in a FULL
-    // inventory addItem must top off a matching stack -- which needs
-    // isSimilar() -- so the pickup silently does nothing ("full inventory
-    // skips", while the same item picks up fine when a slot is free). Fix: when
-    // nothing but empty metadata is left after untagging, hand over a pristine
-    // vanilla stack so it stacks normally. Items that still carry real meta
-    // (names/enchants/potion data/...) are returned untouched -- and those are
-    // unstackable anyway, so they always need a free slot regardless.
+    // Normalises a ground item into a clean, vanilla-stacking copy. New stacked
+    // items are no longer tagged, so this is usually a no-op -- but it also
+    // MIGRATES legacy items saved with the old STACK_KEY tag. It strips the tag,
+    // and (on Minecraft 1.20.5+, the data-component era) removing that last PDC
+    // key can leave an empty `custom_data` component behind, which makes the
+    // stack fail isSimilar() against a genuinely vanilla stack. So when nothing
+    // but empty metadata remains after untagging, it hands over a pristine
+    // vanilla stack that stacks normally. Items that still carry real meta
+    // (names/enchants/potion data/...) are returned untouched.
     private ItemStack cleanForPickup(ItemStack tagged) {
         ItemStack cleaned = tagged.clone();
 
@@ -678,6 +686,22 @@ public class ItemManagement implements Listener {
             updateHologram(item);
         }
         return pickedUp;
+    }
+
+    // Stop vanilla from merging item ENTITIES while stacking is on. The stacker
+    // keeps each entity's visible stack at 1 and tracks the real count
+    // separately, so if vanilla merged two of them it would combine the two
+    // visible 1s and the real count on the merged-away entity would be LOST.
+    // This replaces the old approach of tagging the ItemStack to make it
+    // un-mergeable -- that tag also made the item unrecognisable to vanilla's
+    // pickup-fit check, which is what stopped stacked items being picked up into
+    // a full inventory. Cancelling here prevents the loss without altering the
+    // ItemStack, so the merge is handled solely by our own per-second pass.
+    @EventHandler
+    public void onItemMerge(ItemMergeEvent event) {
+        if (stackingEnabled) {
+            event.setCancelled(true);
+        }
     }
 
     @EventHandler
