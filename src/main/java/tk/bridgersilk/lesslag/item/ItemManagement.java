@@ -707,6 +707,12 @@ public class ItemManagement implements Listener {
     @EventHandler
     public void onInventoryItemPickup(InventoryPickupItemEvent event) {
         Item item = event.getItem();
+        // Never touch an entity already removed this tick (e.g. fully picked up
+        // by a player/hopper a moment earlier): its count is already gone, so
+        // re-handling could only ever double-count. Belt-and-suspenders on top
+        // of the tracked-amount decrement.
+        if (item.isDead()) return;
+
         int totalAmount = resolveStackedAmount(item);
         if (totalAmount < 0) return; // not a stacked item -> let vanilla handle it
 
@@ -725,6 +731,8 @@ public class ItemManagement implements Listener {
         if (!(event.getEntity() instanceof Player player)) return;
 
         Item item = event.getItem();
+        if (item.isDead()) return; // already handled/removed this tick -> never double-process
+
         int totalAmount = resolveStackedAmount(item);
         if (totalAmount < 0) return; // not a stacked item -> let vanilla handle it
 
